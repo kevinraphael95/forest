@@ -27,7 +27,7 @@ document.body.appendChild(renderer.domElement);
 ═══════════════════════════════════════════════════════ */
 const scene  = new THREE.Scene();
 // Brouillard linéaire Skyrim — commence loin, finit très loin
-scene.fog    = new THREE.Fog(0xb8cfd8, 120, 400);
+scene.fog    = new THREE.Fog(0xb8cfd8, 200, 800);
 
 const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.1, 2000);
 camera.position.set(0, 10, 0);
@@ -104,8 +104,8 @@ function makeSprite(inner, outer, size){
     sp.scale.setScalar(size);
     return sp;
 }
-const sunSprite  = makeSprite('rgba(255,255,220,1)', 'rgba(255,200,80,0.7)',  180);
-const sunGlow    = makeSprite('rgba(255,160,40,0.5)','rgba(255,120,20,0.2)',  450);
+const sunSprite  = makeSprite('rgba(255,255,220,1)', 'rgba(255,200,80,0.7)',  300);
+const sunGlow    = makeSprite('rgba(255,160,40,0.5)','rgba(255,120,20,0.2)',  700);
 const moonSprite = makeSprite('rgba(220,235,255,1)', 'rgba(140,160,210,0.6)', 130);
 const moonGlow   = makeSprite('rgba(80,100,180,0.3)','rgba(40,60,120,0.1)',   340);
 scene.add(sunSprite, sunGlow, moonSprite, moonGlow);
@@ -179,8 +179,8 @@ function updateDayNight(elapsed){
 
     // Brouillard : lointain le jour, dense et sombre la nuit
     scene.fog.color.lerpColors(_fogNight, _fogDay, sfS);
-    scene.fog.near = 80  + sfS*40;
-    scene.fog.far  = 380 + sfS*220;
+    scene.fog.near = 180 + sfS*60;
+    scene.fog.far  = 700 + sfS*400;
 
     starMat.uniforms.uOp.value = Math.max(0, 1-sfS*2)*0.9;
     starMat.uniforms.uT.value  = elapsed;
