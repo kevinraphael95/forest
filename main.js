@@ -480,7 +480,8 @@ function buildMushroom(wx, wz, gy, r, grp){
    CHUNKS — génération infinie asynchrone
 ═══════════════════════════════════════════════════════ */
 const CHUNK_SIZE   = 80;
-const CHUNK_RADIUS = 3;
+const CHUNK_SEGS   = 14;
+const CHUNK_RADIUS = 2; /* 2 */
 const loadedChunks = new Map();
 const chunkFadeIn  = new Map();
 
@@ -502,22 +503,13 @@ function _buildChunk(cx, cz, key){
     const r = seededRng(cx*73856093^cz*19349663);
     const grp = new THREE.Group(), lc = [];
 
-    const ddx=cx-lastCX, ddz=cz-lastCZ;
-    const distChunk = Math.sqrt(ddx*ddx + ddz*ddz);
-    const isNear = distChunk <= 1;
-    const isMid  = distChunk <= 2;
-    // Segments terrain selon distance
-    const segs = isNear ? 14 : isMid ? 8 : 4;
-
     // Sol
-    const tgeo = new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE, segs, segs);
+    const tgeo = new THREE.PlaneGeometry(CHUNK_SIZE,CHUNK_SIZE,CHUNK_SEGS,CHUNK_SEGS);
     const vp   = tgeo.attributes.position.array;
     for(let i=0; i<vp.length; i+=3) vp[i+2] = fbm(oX+vp[i], oZ-vp[i+1]);
     tgeo.computeVertexNormals();
     const terr = new THREE.Mesh(tgeo, MAT.ground);
-    terr.rotation.x=-Math.PI/2; terr.position.set(oX,0,oZ);
-    terr.receiveShadow = isNear;
-    grp.add(terr);
+    terr.rotation.x=-Math.PI/2; terr.position.set(oX,0,oZ); terr.receiveShadow=true; grp.add(terr);
 
     // Tour
     let towerInfo = null;
@@ -528,14 +520,14 @@ function _buildChunk(cx, cz, key){
         towerInfo = buildTower(twx,twz,grp,lc);
     }
 
+    // Système de placement sans chevauchement
     const occupied = [];
     if(towerInfo) occupied.push({x:towerInfo.wx, z:towerInfo.wz, r:towerInfo.clearR+5});
     const canPlace = (wx,wz,d) => !occupied.some(o=>{ const dx=wx-o.x,dz=wz-o.z; return dx*dx+dz*dz<(d+o.r)*(d+o.r); });
     const occupy   = (wx,wz,rad) => occupied.push({x:wx,z:wz,r:rad});
 
-    // Arbres — nombre selon distance
-    const treeN = isNear ? 9+(r()*9|0) : isMid ? 6+(r()*5|0) : 3+(r()*3|0);
-    const tpts = [];
+    // Arbres — plus nombreux et plus variés pour horizon dense
+    const treeN = 9+(r()*9|0), tpts = [];
     for(let i=0; i<treeN; i++){
         let wx,wz,ok=false,tries=0;
         do{
@@ -547,34 +539,24 @@ function _buildChunk(cx, cz, key){
 
         const gy=findY(wx,wz), h=26+r()*22, tr=1.2+r()*1.2, trunkH=h*(0.26+r()*0.10);
         const tgr = new THREE.Group();
+        const trunk = new THREE.Mesh(new THREE.CylinderGeometry(tr*0.55,tr*1.4,trunkH+6,9), MAT.trunk);
+        trunk.position.y=trunkH/2-3; trunk.castShadow=true; tgr.add(trunk);
 
-        // Tronc — segments selon distance
-        const trunkSegs = isNear ? 9 : isMid ? 6 : 5;
-        const trunk = new THREE.Mesh(new THREE.CylinderGeometry(tr*0.55,tr*1.4,trunkH+6,trunkSegs), MAT.trunk);
-        trunk.position.y=trunkH/2-3;
-        trunk.castShadow = isNear;
-        tgr.add(trunk);
-
-        // Feuillage — layers selon distance
-        const layers = isNear ? 9+(r()*6|0) : isMid ? 5+(r()*2|0) : 3;
-        const coneSegs = isNear ? 8 : isMid ? 6 : 5;
-        const foliageH=h-trunkH;
+        const layers=9+(r()*6|0), foliageH=h-trunkH;
         for(let li=0; li<layers; li++){
             const ratio=li/(layers-1);
             const coneY=trunkH+ratio*foliageH*0.90;
             const radius=tr*4.5*(1-ratio*0.72)+1.5;
             const coneH=(foliageH/layers)*2.2;
-            const cone = new THREE.Mesh(new THREE.ConeGeometry(radius,coneH,coneSegs), CONE_MATS[(r()*3)|0]);
-            cone.position.y=coneY;
-            cone.castShadow = isNear;
-            tgr.add(cone);
-            if(isNear) windObjects.push({mesh:cone, phase:r()*10, speed:0.5, amp:0.011});
+            const cone = new THREE.Mesh(new THREE.ConeGeometry(radius,coneH,8), CONE_MATS[(r()*3)|0]);
+            cone.position.y=coneY; cone.castShadow=true; tgr.add(cone);
+            windObjects.push({mesh:cone, phase:r()*10, speed:0.5, amp:0.011});
         }
         tgr.position.set(wx,gy,wz); grp.add(tgr);
         lc.push({type:'cylinder', x:wx, y:gy, z:wz, r:tr*1.7, h:trunkH+6});
     }
 
-    // Rochers
+    // Rochers — plus gros, style nordique
     for(let i=0, n=2+(r()*4|0); i<n; i++){
         let wx,wz,tries=0;
         do{ wx=oX+(r()-0.5)*CHUNK_SIZE*0.88; wz=oZ+(r()-0.5)*CHUNK_SIZE*0.88; } while(!canPlace(wx,wz,3)&&++tries<15);
@@ -582,67 +564,55 @@ function _buildChunk(cx, cz, key){
         const gy=findY(wx,wz), sx=1.2+r()*3.0, sy=sx*(0.5+r()*0.5), sz=1.2+r()*3.0;
         const rock = new THREE.Mesh(GEO.rock, MAT.rock);
         rock.scale.set(sx,sy,sz); rock.rotation.set((r()-0.5)*0.4,r()*Math.PI*2,(r()-0.5)*0.4);
-        rock.position.set(wx,gy+sy*0.35,wz);
-        rock.castShadow = isNear;
-        rock.receiveShadow = isNear;
-        grp.add(rock);
+        rock.position.set(wx,gy+sy*0.35,wz); rock.castShadow=rock.receiveShadow=true; grp.add(rock);
         lc.push({type:'sphere', x:wx, y:gy+sy*0.48, z:wz, r:Math.max(sx,sz)*0.9, topY:gy+sy*0.48+sy*0.85});
         occupy(wx,wz,Math.max(sx,sz)*1.2);
     }
 
-    // Fleurs — proches seulement
-    if(isNear || isMid){
-        const flowerN = isNear ? 20+(r()*40|0) : 8+(r()*10|0);
-        for(let i=0; i<flowerN; i++){
-            let wx,wz,tries=0;
-            do{ wx=oX+(r()-0.5)*CHUNK_SIZE*0.9; wz=oZ+(r()-0.5)*CHUNK_SIZE*0.9; } while(!canPlace(wx,wz,1.5)&&++tries<10);
-            if(tries>=10) continue;
-            const gy=findY(wx,wz);
-            const st = new THREE.Mesh(GEO.stem, MAT.stem); st.position.set(wx,gy+0.15,wz); grp.add(st);
-            const hd = new THREE.Mesh(GEO.flower, flowerMat(FLOWER_COLORS[(r()*FLOWER_COLORS.length)|0]));
-            hd.position.set(wx,gy+0.65,wz); grp.add(hd); occupy(wx,wz,0.8);
+    // Fleurs — teintes froides
+    for(let i=0, n=20+(r()*40|0); i<n; i++){
+        let wx,wz,tries=0;
+        do{ wx=oX+(r()-0.5)*CHUNK_SIZE*0.9; wz=oZ+(r()-0.5)*CHUNK_SIZE*0.9; } while(!canPlace(wx,wz,1.5)&&++tries<10);
+        if(tries>=10) continue;
+        const gy=findY(wx,wz);
+        const st = new THREE.Mesh(GEO.stem, MAT.stem); st.position.set(wx,gy+0.15,wz); grp.add(st);
+        const hd = new THREE.Mesh(GEO.flower, flowerMat(FLOWER_COLORS[(r()*FLOWER_COLORS.length)|0]));
+        hd.position.set(wx,gy+0.65,wz); grp.add(hd); occupy(wx,wz,0.8);
+    }
+
+    // Champignons
+    for(let i=0, n=1+(r()*3|0); i<n; i++){
+        let wx,wz,tries=0;
+        do{ wx=oX+(r()-0.5)*CHUNK_SIZE*0.88; wz=oZ+(r()-0.5)*CHUNK_SIZE*0.88; } while(!canPlace(wx,wz,2)&&++tries<15);
+        if(tries>=15) continue;
+        buildMushroom(wx,wz,findY(wx,wz),r,grp); occupy(wx,wz,1.5);
+        if(r()>0.5) for(let c=0,cn=2+(r()*3|0);c<cn;c++){
+            const ox=wx+(r()-0.5)*2.5, oz=wz+(r()-0.5)*2.5;
+            if(canPlace(ox,oz,1)){ buildMushroom(ox,oz,findY(ox,oz),r,grp); occupy(ox,oz,1); }
         }
     }
 
-    // Champignons — proches seulement
-    if(isNear || isMid){
-        for(let i=0, n=1+(r()*3|0); i<n; i++){
-            let wx,wz,tries=0;
-            do{ wx=oX+(r()-0.5)*CHUNK_SIZE*0.88; wz=oZ+(r()-0.5)*CHUNK_SIZE*0.88; } while(!canPlace(wx,wz,2)&&++tries<15);
-            if(tries>=15) continue;
-            buildMushroom(wx,wz,findY(wx,wz),r,grp); occupy(wx,wz,1.5);
-            if(r()>0.5) for(let c=0,cn=2+(r()*3|0);c<cn;c++){
-                const ox=wx+(r()-0.5)*2.5, oz=wz+(r()-0.5)*2.5;
-                if(canPlace(ox,oz,1)){ buildMushroom(ox,oz,findY(ox,oz),r,grp); occupy(ox,oz,1); }
-            }
-        }
+    // Herbe instanciée
+    const gn = 50+(r()*50|0);
+    const gm = new THREE.InstancedMesh(GEO.grass, MAT.grass, gn);
+    gm.frustumCulled = false;
+    const dm = new THREE.Object3D();
+    for(let i=0; i<gn; i++){
+        const wx=oX+(r()-0.5)*CHUNK_SIZE, wz=oZ+(r()-0.5)*CHUNK_SIZE;
+        dm.position.set(wx, findY(wx,wz), wz); dm.scale.setScalar(0.5+r()*0.8); dm.rotation.y=r()*Math.PI; dm.updateMatrix();
+        gm.setMatrixAt(i, dm.matrix);
+    }
+    gm.instanceMatrix.needsUpdate=true; grp.add(gm);
+
+    // Lucioles
+    for(let i=0, n=2+(r()*5|0); i<n; i++){
+        const wx=oX+(r()-0.5)*CHUNK_SIZE*0.88, wz=oZ+(r()-0.5)*CHUNK_SIZE*0.88;
+        const fy=findY(wx,wz)+2+r()*4;
+        const m = new THREE.Mesh(GEO.ff, MAT.ff); m.position.set(wx,fy,wz); grp.add(m);
+        fireflyData.push({mesh:m, baseY:fy, phase:r()*10});
     }
 
-    // Herbe — proches seulement
-    if(isNear || isMid){
-        const gn = isNear ? 50+(r()*50|0) : 20+(r()*20|0);
-        const gm = new THREE.InstancedMesh(GEO.grass, MAT.grass, gn);
-        gm.frustumCulled = false;
-        const dm = new THREE.Object3D();
-        for(let i=0; i<gn; i++){
-            const wx=oX+(r()-0.5)*CHUNK_SIZE, wz=oZ+(r()-0.5)*CHUNK_SIZE;
-            dm.position.set(wx, findY(wx,wz), wz); dm.scale.setScalar(0.5+r()*0.8); dm.rotation.y=r()*Math.PI; dm.updateMatrix();
-            gm.setMatrixAt(i, dm.matrix);
-        }
-        gm.instanceMatrix.needsUpdate=true; grp.add(gm);
-    }
-
-    // Lucioles — proches seulement
-    if(isNear){
-        for(let i=0, n=2+(r()*5|0); i<n; i++){
-            const wx=oX+(r()-0.5)*CHUNK_SIZE*0.88, wz=oZ+(r()-0.5)*CHUNK_SIZE*0.88;
-            const fy=findY(wx,wz)+2+r()*4;
-            const m = new THREE.Mesh(GEO.ff, MAT.ff); m.position.set(wx,fy,wz); grp.add(m);
-            fireflyData.push({mesh:m, baseY:fy, phase:r()*10});
-        }
-    }
-
-    // Fade-in
+    // Fade-in — opacité 0 → 1
     grp.traverse(obj=>{
         if(!obj.isMesh) return;
         const mats = Array.isArray(obj.material)?obj.material:[obj.material];
@@ -681,20 +651,12 @@ function updateChunks(px, pz){
     const cx=Math.round(px/CHUNK_SIZE), cz=Math.round(pz/CHUNK_SIZE);
     if(cx===lastCX && cz===lastCZ) return;
     lastCX=cx; lastCZ=cz;
-
-    for(let dx=-CHUNK_RADIUS; dx<=CHUNK_RADIUS; dx++){
-        for(let dz=-CHUNK_RADIUS; dz<=CHUNK_RADIUS; dz++){
-            // Circulaire : on ne charge que si dans le rayon
-            if(dx*dx + dz*dz <= CHUNK_RADIUS*CHUNK_RADIUS)
-                generateChunk(cx+dx, cz+dz);
-        }
-    }
-
+    for(let dx=-CHUNK_RADIUS;dx<=CHUNK_RADIUS;dx++)
+        for(let dz=-CHUNK_RADIUS;dz<=CHUNK_RADIUS;dz++)
+            generateChunk(cx+dx, cz+dz);
     for(const [key] of loadedChunks){
         const [kcx,kcz] = key.split(',').map(Number);
-        const ddx=kcx-cx, ddz=kcz-cz;
-        if(ddx*ddx + ddz*ddz > (CHUNK_RADIUS+1)*(CHUNK_RADIUS+1))
-            unloadChunk(kcx,kcz);
+        if(Math.abs(kcx-cx)>CHUNK_RADIUS+1 || Math.abs(kcz-cz)>CHUNK_RADIUS+1) unloadChunk(kcx,kcz);
     }
 }
 
