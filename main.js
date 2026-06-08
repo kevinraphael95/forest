@@ -78,10 +78,10 @@ scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xfff8e8, 4.5);
 sun.castShadow = true;
 sun.shadow.mapSize.setScalar(2048);
-sun.shadow.camera.left   = sun.shadow.camera.bottom = -80;
-sun.shadow.camera.right  = sun.shadow.camera.top    =  80;
-sun.shadow.camera.far    = 400;
-sun.shadow.bias = -0.001;
+sun.shadow.camera.left   = sun.shadow.camera.bottom = -30;
+sun.shadow.camera.right  = sun.shadow.camera.top    =  30;
+sun.shadow.camera.far    = 80;
+sun.shadow.bias          = -0.001;
 scene.add(sun);
 scene.add(sun.target);
 
@@ -104,8 +104,8 @@ function makeSprite(inner, outer, size){
     sp.scale.setScalar(size);
     return sp;
 }
-const sunSprite  = makeSprite('rgba(255,255,220,1)', 'rgba(255,200,80,0.7)',  180);
-const sunGlow    = makeSprite('rgba(255,160,40,0.5)','rgba(255,120,20,0.2)',  450);
+const sunSprite  = makeSprite('rgba(255,255,220,1)', 'rgba(255,200,80,0.7)',   80);
+const sunGlow    = makeSprite('rgba(255,160,40,0.5)','rgba(255,120,20,0.2)',  200);
 const moonSprite = makeSprite('rgba(220,235,255,1)', 'rgba(140,160,210,0.6)', 130);
 const moonGlow   = makeSprite('rgba(80,100,180,0.3)','rgba(40,60,120,0.1)',   340);
 scene.add(sunSprite, sunGlow, moonSprite, moonGlow);
@@ -141,43 +141,46 @@ const DAY_DURATION = 1200, ORBIT_R = 1400;
 const _fogDay   = new THREE.Color(0xb8cfd8);
 const _fogNight = new THREE.Color(0x0a1428);
 const _sd = new THREE.Vector3(), _md = new THREE.Vector3();
+const _sunDir = new THREE.Vector3();
 
 function updateDayNight(elapsed){
     const angle = ((elapsed/DAY_DURATION)*Math.PI*2) % (Math.PI*2);
     const sinA  = Math.sin(angle);
     const sf    = Math.max(0, sinA);
-    const sfS   = sf*sf*(3-2*sf);   // smoothstep
+    const sfS   = sf*sf*(3-2*sf);
     const mf    = Math.max(0,-sinA);
     const mfS   = mf*mf*(3-2*mf);
 
-    const sunX = Math.cos(angle)*ORBIT_R, sunY = Math.sin(angle)*ORBIT_R;
-    sun.position.set(
-        camera.position.x + sunX,
-        sunY,
-        camera.position.z + ORBIT_R*0.2
-    );
+    // Soleil suit le joueur, shadow camera resserrée
+    _sunDir.set(Math.cos(angle), Math.sin(angle), 0.2).normalize();
+    sun.position.copy(camera.position).addScaledVector(_sunDir, 60);
     sun.target.position.set(camera.position.x, 0, camera.position.z);
     sun.target.updateMatrixWorld();
-    moonLight.position.set(-sunX,-sunY, ORBIT_R*0.2);
+    sun.shadow.camera.updateProjectionMatrix();
+
+    moonLight.position.set(
+        camera.position.x - _sunDir.x*60,
+        -_sunDir.y*60,
+        camera.position.z - _sunDir.z*60
+    );
 
     const cp = camera.position;
-    _sd.set(sunX,sunY,ORBIT_R*0.2).normalize();
-    _md.copy(_sd).negate();
-    sunSprite.position.copy(cp).addScaledVector(_sd,1350);
-    sunGlow.position.copy(cp).addScaledVector(_sd,1340);
-    moonSprite.position.copy(cp).addScaledVector(_md,1350);
-    moonGlow.position.copy(cp).addScaledVector(_md,1340);
+    sunSprite.position.copy(cp).addScaledVector(_sunDir, 1350);
+    sunGlow.position.copy(cp).addScaledVector(_sunDir, 1340);
+    moonSprite.position.copy(cp).addScaledVector(_sunDir.clone().negate(), 1350);
+    moonGlow.position.copy(cp).addScaledVector(_sunDir.clone().negate(), 1340);
 
     sun.intensity       = 0.05 + sfS*3.0;
-    moonLight.intensity = 0.8  + mfS*1.2;   // lune bien plus forte
-    hemi.intensity = 0.75 + sfS*1.05;  // ambiance nuit bleutée visible
+    moonLight.intensity = 0.8  + mfS*1.2;
+    hemi.intensity      = 0.75 + sfS*1.05;
 
-    sunSprite.material.opacity  = Math.pow(sf, 0.35);
-    sunGlow.material.opacity    = Math.pow(sf, 0.5)*0.7;
+    // Soleil : disparaît proprement à l'horizon
+    const horizonFade = Math.pow(Math.max(0, sinA), 0.15);
+    sunSprite.material.opacity  = horizonFade;
+    sunGlow.material.opacity    = horizonFade * 0.6;
     moonSprite.material.opacity = Math.pow(mf, 0.35);
-    moonGlow.material.opacity   = Math.pow(mf, 0.5)*0.6;
+    moonGlow.material.opacity   = Math.pow(mf, 0.5) * 0.6;
 
-    // Brouillard : lointain le jour, dense et sombre la nuit
     scene.fog.color.lerpColors(_fogNight, _fogDay, sfS);
     scene.fog.near = 80  + sfS*40;
     scene.fog.far  = 380 + sfS*220;
@@ -186,7 +189,6 @@ function updateDayNight(elapsed){
     starMat.uniforms.uT.value  = elapsed;
     starsObj.position.copy(cp);
 
-    // Phases ciel avec point milieu pour gradient 3 couleurs
     const a = angle, PI = Math.PI;
     if      (a < PI*0.20) lerpSky(SKY.dawn,   SKY.day,    a/(PI*0.20));
     else if (a < PI*0.75) setSky(SKY.day);
@@ -503,8 +505,14 @@ function _buildChunk(cx, cz, key){
     const r = seededRng(cx*73856093^cz*19349663);
     const grp = new THREE.Group(), lc = [];
 
+    // LOD selon distance au joueur
+    const dist   = Math.hypot(cx - lastCX, cz - lastCZ);
+    const isNear = dist <= 1;
+    const isMid  = dist === 2;
+    const segs   = isNear ? 14 : isMid ? 6 : 3;
+
     // Sol
-    const tgeo = new THREE.PlaneGeometry(CHUNK_SIZE,CHUNK_SIZE,CHUNK_SEGS,CHUNK_SEGS);
+    const tgeo = new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE, segs, segs);
     const vp   = tgeo.attributes.position.array;
     for(let i=0; i<vp.length; i+=3) vp[i+2] = fbm(oX+vp[i], oZ-vp[i+1]);
     tgeo.computeVertexNormals();
@@ -520,14 +528,14 @@ function _buildChunk(cx, cz, key){
         towerInfo = buildTower(twx,twz,grp,lc);
     }
 
-    // Système de placement sans chevauchement
     const occupied = [];
     if(towerInfo) occupied.push({x:towerInfo.wx, z:towerInfo.wz, r:towerInfo.clearR+5});
     const canPlace = (wx,wz,d) => !occupied.some(o=>{ const dx=wx-o.x,dz=wz-o.z; return dx*dx+dz*dz<(d+o.r)*(d+o.r); });
     const occupy   = (wx,wz,rad) => occupied.push({x:wx,z:wz,r:rad});
 
-    // Arbres — plus nombreux et plus variés pour horizon dense
-    const treeN = 9+(r()*9|0), tpts = [];
+    // Arbres
+    const treeN = isNear ? 9+(r()*9|0) : isMid ? 5+(r()*5|0) : 3+(r()*3|0);
+    const tpts = [];
     for(let i=0; i<treeN; i++){
         let wx,wz,ok=false,tries=0;
         do{
@@ -540,23 +548,28 @@ function _buildChunk(cx, cz, key){
         const gy=findY(wx,wz), h=26+r()*22, tr=1.2+r()*1.2, trunkH=h*(0.26+r()*0.10);
         const tgr = new THREE.Group();
         const trunk = new THREE.Mesh(new THREE.CylinderGeometry(tr*0.55,tr*1.4,trunkH+6,9), MAT.trunk);
-        trunk.position.y=trunkH/2-3; trunk.castShadow=true; tgr.add(trunk);
+        trunk.position.y=trunkH/2-3;
+        trunk.castShadow = isNear;
+        tgr.add(trunk);
 
-        const layers=9+(r()*6|0), foliageH=h-trunkH;
+        const layers=isNear ? 9+(r()*6|0) : isMid ? 5 : 3;
+        const foliageH=h-trunkH;
         for(let li=0; li<layers; li++){
             const ratio=li/(layers-1);
             const coneY=trunkH+ratio*foliageH*0.90;
             const radius=tr*4.5*(1-ratio*0.72)+1.5;
             const coneH=(foliageH/layers)*2.2;
             const cone = new THREE.Mesh(new THREE.ConeGeometry(radius,coneH,8), CONE_MATS[(r()*3)|0]);
-            cone.position.y=coneY; cone.castShadow=true; tgr.add(cone);
-            windObjects.push({mesh:cone, phase:r()*10, speed:0.5, amp:0.011});
+            cone.position.y=coneY;
+            cone.castShadow = isNear;
+            tgr.add(cone);
+            if(isNear) windObjects.push({mesh:cone, phase:r()*10, speed:0.5, amp:0.011});
         }
         tgr.position.set(wx,gy,wz); grp.add(tgr);
         lc.push({type:'cylinder', x:wx, y:gy, z:wz, r:tr*1.7, h:trunkH+6});
     }
 
-    // Rochers — plus gros, style nordique
+    // Rochers
     for(let i=0, n=2+(r()*4|0); i<n; i++){
         let wx,wz,tries=0;
         do{ wx=oX+(r()-0.5)*CHUNK_SIZE*0.88; wz=oZ+(r()-0.5)*CHUNK_SIZE*0.88; } while(!canPlace(wx,wz,3)&&++tries<15);
@@ -564,62 +577,72 @@ function _buildChunk(cx, cz, key){
         const gy=findY(wx,wz), sx=1.2+r()*3.0, sy=sx*(0.5+r()*0.5), sz=1.2+r()*3.0;
         const rock = new THREE.Mesh(GEO.rock, MAT.rock);
         rock.scale.set(sx,sy,sz); rock.rotation.set((r()-0.5)*0.4,r()*Math.PI*2,(r()-0.5)*0.4);
-        rock.position.set(wx,gy+sy*0.35,wz); rock.castShadow=rock.receiveShadow=true; grp.add(rock);
+        rock.position.set(wx,gy+sy*0.35,wz);
+        rock.castShadow = isNear;
+        rock.receiveShadow = true;
+        grp.add(rock);
         lc.push({type:'sphere', x:wx, y:gy+sy*0.48, z:wz, r:Math.max(sx,sz)*0.9, topY:gy+sy*0.48+sy*0.85});
         occupy(wx,wz,Math.max(sx,sz)*1.2);
     }
 
-    // Fleurs — teintes froides
-    for(let i=0, n=20+(r()*40|0); i<n; i++){
-        let wx,wz,tries=0;
-        do{ wx=oX+(r()-0.5)*CHUNK_SIZE*0.9; wz=oZ+(r()-0.5)*CHUNK_SIZE*0.9; } while(!canPlace(wx,wz,1.5)&&++tries<10);
-        if(tries>=10) continue;
-        const gy=findY(wx,wz);
-        const st = new THREE.Mesh(GEO.stem, MAT.stem); st.position.set(wx,gy+0.15,wz); grp.add(st);
-        const hd = new THREE.Mesh(GEO.flower, flowerMat(FLOWER_COLORS[(r()*FLOWER_COLORS.length)|0]));
-        hd.position.set(wx,gy+0.65,wz); grp.add(hd); occupy(wx,wz,0.8);
+    // Fleurs — seulement chunks proches/moyens
+    if(isNear || isMid){
+        const flowerN = isNear ? 20+(r()*40|0) : 8+(r()*12|0);
+        for(let i=0; i<flowerN; i++){
+            let wx,wz,tries=0;
+            do{ wx=oX+(r()-0.5)*CHUNK_SIZE*0.9; wz=oZ+(r()-0.5)*CHUNK_SIZE*0.9; } while(!canPlace(wx,wz,1.5)&&++tries<10);
+            if(tries>=10) continue;
+            const gy=findY(wx,wz);
+            const st = new THREE.Mesh(GEO.stem, MAT.stem); st.position.set(wx,gy+0.15,wz); grp.add(st);
+            const hd = new THREE.Mesh(GEO.flower, flowerMat(FLOWER_COLORS[(r()*FLOWER_COLORS.length)|0]));
+            hd.position.set(wx,gy+0.65,wz); grp.add(hd); occupy(wx,wz,0.8);
+        }
     }
 
-    // Champignons
-    for(let i=0, n=1+(r()*3|0); i<n; i++){
-        let wx,wz,tries=0;
-        do{ wx=oX+(r()-0.5)*CHUNK_SIZE*0.88; wz=oZ+(r()-0.5)*CHUNK_SIZE*0.88; } while(!canPlace(wx,wz,2)&&++tries<15);
-        if(tries>=15) continue;
-        buildMushroom(wx,wz,findY(wx,wz),r,grp); occupy(wx,wz,1.5);
-        if(r()>0.5) for(let c=0,cn=2+(r()*3|0);c<cn;c++){
-            const ox=wx+(r()-0.5)*2.5, oz=wz+(r()-0.5)*2.5;
-            if(canPlace(ox,oz,1)){ buildMushroom(ox,oz,findY(ox,oz),r,grp); occupy(ox,oz,1); }
+    // Champignons — seulement chunks proches/moyens
+    if(isNear || isMid){
+        for(let i=0, n=1+(r()*3|0); i<n; i++){
+            let wx,wz,tries=0;
+            do{ wx=oX+(r()-0.5)*CHUNK_SIZE*0.88; wz=oZ+(r()-0.5)*CHUNK_SIZE*0.88; } while(!canPlace(wx,wz,2)&&++tries<15);
+            if(tries>=15) continue;
+            buildMushroom(wx,wz,findY(wx,wz),r,grp); occupy(wx,wz,1.5);
+            if(r()>0.5) for(let c=0,cn=2+(r()*3|0);c<cn;c++){
+                const ox=wx+(r()-0.5)*2.5, oz=wz+(r()-0.5)*2.5;
+                if(canPlace(ox,oz,1)){ buildMushroom(ox,oz,findY(ox,oz),r,grp); occupy(ox,oz,1); }
+            }
         }
     }
 
     // Herbe instanciée
-    const gn = 50+(r()*50|0);
-    const gm = new THREE.InstancedMesh(GEO.grass, MAT.grass, gn);
-    gm.frustumCulled = false;
-    const dm = new THREE.Object3D();
-    for(let i=0; i<gn; i++){
-        const wx=oX+(r()-0.5)*CHUNK_SIZE, wz=oZ+(r()-0.5)*CHUNK_SIZE;
-        dm.position.set(wx, findY(wx,wz), wz); dm.scale.setScalar(0.5+r()*0.8); dm.rotation.y=r()*Math.PI; dm.updateMatrix();
-        gm.setMatrixAt(i, dm.matrix);
-    }
-    gm.instanceMatrix.needsUpdate=true; grp.add(gm);
-
-    // Lucioles
-    for(let i=0, n=2+(r()*5|0); i<n; i++){
-        const wx=oX+(r()-0.5)*CHUNK_SIZE*0.88, wz=oZ+(r()-0.5)*CHUNK_SIZE*0.88;
-        const fy=findY(wx,wz)+2+r()*4;
-        const m = new THREE.Mesh(GEO.ff, MAT.ff); m.position.set(wx,fy,wz); grp.add(m);
-        fireflyData.push({mesh:m, baseY:fy, phase:r()*10});
+    const gn = isNear ? 50+(r()*50|0) : isMid ? 20+(r()*20|0) : 0;
+    if(gn > 0){
+        const gm = new THREE.InstancedMesh(GEO.grass, MAT.grass, gn);
+        gm.frustumCulled = false;
+        const dm = new THREE.Object3D();
+        for(let i=0; i<gn; i++){
+            const wx=oX+(r()-0.5)*CHUNK_SIZE, wz=oZ+(r()-0.5)*CHUNK_SIZE;
+            dm.position.set(wx, findY(wx,wz), wz); dm.scale.setScalar(0.5+r()*0.8); dm.rotation.y=r()*Math.PI; dm.updateMatrix();
+            gm.setMatrixAt(i, dm.matrix);
+        }
+        gm.instanceMatrix.needsUpdate=true; grp.add(gm);
     }
 
-    // Fade-in — opacité 0 → 1
+    // Lucioles — seulement chunks proches
+    if(isNear){
+        for(let i=0, n=2+(r()*5|0); i<n; i++){
+            const wx=oX+(r()-0.5)*CHUNK_SIZE*0.88, wz=oZ+(r()-0.5)*CHUNK_SIZE*0.88;
+            const fy=findY(wx,wz)+2+r()*4;
+            const m = new THREE.Mesh(GEO.ff, MAT.ff); m.position.set(wx,fy,wz); grp.add(m);
+            fireflyData.push({mesh:m, baseY:fy, phase:r()*10});
+        }
+    }
+
     grp.traverse(obj=>{
         if(!obj.isMesh) return;
         const mats = Array.isArray(obj.material)?obj.material:[obj.material];
         const cl = mats.map(m=>{ const c=m.clone(); c._bOp=c.opacity??1; c.transparent=true; c.opacity=0; return c; });
         obj.material = Array.isArray(obj.material)?cl:cl[0];
     });
-
     globalColliders.push(...lc);
     scene.add(grp);
     loadedChunks.set(key, {group:grp, localColliders:lc});
@@ -823,7 +846,6 @@ function animate(){
     }
 
     updateDayNight(elapsed);
-    sun.shadow.camera.updateProjectionMatrix();
     if(controls.isLocked) updateMovement(dt);
     updateChunks(camera.position.x, camera.position.z);
     renderer.render(scene, camera);
