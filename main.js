@@ -530,11 +530,13 @@ function buildTower(wx,wz,grp,lc){
             const bar=new THREE.Mesh(GEO.towBarV,MAT.towRail);
             bar.position.set(bx,TOWER_H+0.72,bz); tg.add(bar);
         }
-        for(let j=0;j<3;j++){
-            const offset=(j/2-0.5)*len;
-            const colX=ry===0?wx+cx+offset:wx+cx;
-            const colZ=ry===0?wz+cz:wz+cz+offset;
-            lc.push({type:'cylinder',x:colX,y:gy+TOWER_H,z:colZ,r:0.5,h:1.5});
+        // Mur continu : collider tous les 0.5u pour boucher tout le garde-corps
+        const nCol = Math.ceil(len / 0.5) + 1;
+        for(let j=0;j<=nCol;j++){
+            const offset=(j/nCol - 0.5)*len;
+            const colX = ry===0 ? wx+cx+offset : wx+cx;
+            const colZ = ry===0 ? wz+cz : wz+cz+offset;
+            lc.push({type:'cylinder',x:colX,y:gy+TOWER_H,z:colZ,r:0.30,h:1.5});
         }
     }
     const roofPillarH=5;
@@ -569,7 +571,9 @@ function buildMushroom(wx,wz,gy,r,grp){
 /* ─── CHUNKS ─────────────────────────────────────────── */
 // CHUNK_RADIUS augmenté à 3 pour voir plus loin sans coût excessif
 // (les chunks lointains ont moins d'arbres grâce au LOD implicite)
-const CHUNK_SIZE=80, CHUNK_SEGS=14, CHUNK_RADIUS=3;
+// CHUNK_SEGS doit donner CHUNK_SIZE/CHUNK_SEGS = multiple de HSTEP(0.5)
+// 80/16 = 5.0 → multiple de 0.5 ✓  (était 14 → 80/14≈5.71 → coutures !)
+const CHUNK_SIZE=80, CHUNK_SEGS=16, CHUNK_RADIUS=3;
 const loadedChunks=new Map(), chunkFadeIn=new Map();
 function seededRng(seed){
     let s=(seed^0xdeadbeef)|0;
@@ -593,15 +597,28 @@ function _buildChunk(cx,cz,key){
     const distFromOrigin = Math.sqrt(cx*cx+cz*cz);
     const isLOD = distFromOrigin > 1.5; // chunks lointains = LOD réduit
 
-    /* SOL */
-    // Segments réduits pour chunks lointains
-    const segs = isLOD ? 8 : CHUNK_SEGS;
-    const tgeo=new THREE.PlaneGeometry(CHUNK_SIZE,CHUNK_SIZE,segs,segs);
-    const vp=tgeo.attributes.position.array;
-    for(let i=0;i<vp.length;i+=3) vp[i+2]=fbm(oX+vp[i],oZ-vp[i+1]);
+    /* SOL — grille uniforme pour éviter les coutures entre chunks
+       Tous les chunks utilisent CHUNK_SEGS, les chunks LOD simplifient
+       seulement les arbres/détails, PAS le terrain. Le pas de grille est
+       toujours CHUNK_SIZE/CHUNK_SEGS, donc les bords se partagent
+       exactement les mêmes coordonnées monde entre chunks voisins. */
+    const GRID = CHUNK_SEGS; // toujours identique, même en LOD
+    const STEP = CHUNK_SIZE / GRID;
+    const tgeo = new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE, GRID, GRID);
+    const vp = tgeo.attributes.position.array;
+    // PlaneGeometry en XY avant rotation : x = col, y = row (inversé en Z après rotation)
+    // On recalcule chaque vertex avec heightAt qui snappe à HSTEP
+    for (let i = 0; i < vp.length; i += 3) {
+        // vp[i]=x local, vp[i+1]=y local (sera Z monde après rotation)
+        const wx = oX + vp[i];
+        const wz = oZ - vp[i + 1]; // PlaneGeometry Y → Z monde (rotation.x = -PI/2)
+        vp[i + 2] = heightAt(wx, wz); // Z local = hauteur, deviendra Y monde
+    }
     tgeo.computeVertexNormals();
-    const terr=new THREE.Mesh(tgeo,MAT.ground);
-    terr.rotation.x=-Math.PI/2; terr.position.set(oX,0,oZ); terr.receiveShadow=true;
+    const terr = new THREE.Mesh(tgeo, MAT.ground);
+    terr.rotation.x = -Math.PI / 2;
+    terr.position.set(oX, 0, oZ);
+    terr.receiveShadow = true;
     grp.add(terr);
 
     /* TOUR */
