@@ -418,61 +418,67 @@ const flowerCache={};
 function flowerMat(hex){ if(!flowerCache[hex])flowerCache[hex]=new THREE.MeshStandardMaterial({color:hex,emissive:hex,emissiveIntensity:0.1}); return flowerCache[hex]; }
 
 
-/* ─── CORPS JOUEUR (Immersive First Person) ──────────── */
+/* ─── CORPS JOUEUR ──────────────────────────────────── */
 scene.add(camera);
 
 function makeBodyMesh(geo, color) {
-    const mat = new THREE.MeshBasicMaterial({
-        color, fog: false, transparent: true, opacity: 1, depthTest: false, depthWrite: false
-    });
+    const mat = new THREE.MeshBasicMaterial({ color, fog: false });
     const m = new THREE.Mesh(geo, mat);
-    m.renderOrder = 999;
+    scene.add(m); // directement dans la scène, pas dans camera
     return m;
 }
 
-const playerBody = new THREE.Group();
-
 const torso = makeBodyMesh(new THREE.BoxGeometry(0.40, 0.50, 0.20), 0x1a2a1a);
-torso.position.set(0, -0.55, -0.30);
-playerBody.add(torso);
-
 const belly = makeBodyMesh(new THREE.BoxGeometry(0.36, 0.24, 0.18), 0x1a2a1a);
-belly.position.set(0, -1.00, -0.29);
-playerBody.add(belly);
-
-const armL = makeBodyMesh(new THREE.CylinderGeometry(0.058, 0.050, 0.44, 7), 0x2a1a0e);
-armL.position.set(-0.26, -0.70, -0.28); armL.rotation.z = 0.20;
-playerBody.add(armL);
-
+const armL  = makeBodyMesh(new THREE.CylinderGeometry(0.058, 0.050, 0.44, 7), 0x2a1a0e);
 const handL = makeBodyMesh(new THREE.SphereGeometry(0.065, 6, 6), 0xc68642);
-handL.position.set(-0.29, -0.94, -0.30);
-playerBody.add(handL);
-
-const armR = makeBodyMesh(new THREE.CylinderGeometry(0.058, 0.050, 0.44, 7), 0x2a1a0e);
-armR.position.set(0.26, -0.70, -0.28); armR.rotation.z = -0.20;
-playerBody.add(armR);
-
+const armR  = makeBodyMesh(new THREE.CylinderGeometry(0.058, 0.050, 0.44, 7), 0x2a1a0e);
 const handR = makeBodyMesh(new THREE.SphereGeometry(0.065, 6, 6), 0xc68642);
-handR.position.set(0.29, -0.94, -0.30);
-playerBody.add(handR);
-
-const legL = makeBodyMesh(new THREE.CylinderGeometry(0.075, 0.062, 0.55, 7), 0x2a1a0e);
-legL.position.set(-0.10, -1.30, -0.27);
-playerBody.add(legL);
-
-const legR = makeBodyMesh(new THREE.CylinderGeometry(0.075, 0.062, 0.55, 7), 0x2a1a0e);
-legR.position.set(0.10, -1.30, -0.27);
-playerBody.add(legR);
-
+const legL  = makeBodyMesh(new THREE.CylinderGeometry(0.075, 0.062, 0.55, 7), 0x2a1a0e);
+const legR  = makeBodyMesh(new THREE.CylinderGeometry(0.075, 0.062, 0.55, 7), 0x2a1a0e);
 const footL = makeBodyMesh(new THREE.BoxGeometry(0.12, 0.08, 0.22), 0x2a1a0e);
-footL.position.set(-0.10, -1.58, -0.20);
-playerBody.add(footL);
-
 const footR = makeBodyMesh(new THREE.BoxGeometry(0.12, 0.08, 0.22), 0x2a1a0e);
-footR.position.set(0.10, -1.58, -0.20);
-playerBody.add(footR);
 
-camera.add(playerBody);
+let walkCycle = 0;
+
+function updatePlayerBody(dt) {
+    const moving = keys.z || keys.s || keys.q || keys.d;
+    const run = keys.shift && moving;
+    if (moving) walkCycle += dt * (run ? 9.0 : 5.5);
+    const swing = Math.sin(walkCycle) * (moving ? 0.20 : 0);
+
+    // Direction forward de la caméra (sans le pitch)
+    const camDir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    camDir.y = 0; camDir.normalize();
+    const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+    camRight.y = 0; camRight.normalize();
+    const camUp = new THREE.Vector3(0, 1, 0);
+
+    // Position de base = caméra + offset en world space
+    const base = camera.position.clone();
+
+    function setPartWorld(mesh, ox, oy, oz) {
+        mesh.position.copy(base)
+            .addScaledVector(camDir, oz)
+            .addScaledVector(camRight, ox)
+            .addScaledVector(camUp, oy);
+        mesh.rotation.y = Math.atan2(camDir.x, camDir.z);
+    }
+
+    setPartWorld(torso,  0,    -0.55, 0.35);
+    setPartWorld(belly,  0,    -0.85, 0.34);
+    setPartWorld(armL,  -0.26, -0.65, 0.33);
+    setPartWorld(handL, -0.29, -0.90, 0.33);
+    setPartWorld(armR,   0.26, -0.65, 0.33);
+    setPartWorld(handR,  0.29, -0.90, 0.33);
+    setPartWorld(legL,  -0.10, -1.10, 0.33);
+    setPartWorld(legR,   0.10, -1.10, 0.33);
+    setPartWorld(footL, -0.10, -1.38, 0.28);
+    setPartWorld(footR,  0.10, -1.38, 0.28);
+
+    armL.rotation.x =  swing; armR.rotation.x = -swing;
+    legL.rotation.x = -swing * 0.65; legR.rotation.x = swing * 0.65;
+}
 
 /* ─── ANIMATION CORPS ────────────────────────────────── */
 let walkCycle = 0;
