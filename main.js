@@ -417,6 +417,115 @@ const FLOWER_COLORS=[0xff4444,0x4444ff,0xffff55,0xffffff,0xff66cc];
 const flowerCache={};
 function flowerMat(hex){ if(!flowerCache[hex])flowerCache[hex]=new THREE.MeshStandardMaterial({color:hex,emissive:hex,emissiveIntensity:0.1}); return flowerCache[hex]; }
 
+
+/* ─── CORPS JOUEUR (Immersive First Person) ──────────── */
+const playerBody = new THREE.Group();
+camera.add(playerBody); // attaché à la caméra
+scene.add(camera);      // IMPORTANT : la caméra doit être dans la scène
+
+const bodyMat   = new THREE.MeshStandardMaterial({ color: 0x2a1a0e }); // cuir sombre
+const clothMat  = new THREE.MeshStandardMaterial({ color: 0x1a2a1a }); // vêtement vert forêt
+const skinMat   = new THREE.MeshStandardMaterial({ color: 0xc68642 }); // peau
+
+// Torse
+const torso = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.48, 0.18), clothMat);
+torso.position.set(0, -0.62, -0.22);
+playerBody.add(torso);
+
+// Bras gauche
+const armGeoL = new THREE.CylinderGeometry(0.055, 0.048, 0.42, 7);
+const armL = new THREE.Mesh(armGeoL, bodyMat);
+armL.position.set(-0.24, -0.72, -0.20);
+armL.rotation.z = 0.18;
+playerBody.add(armL);
+
+// Main gauche
+const handL = new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 6), skinMat);
+handL.position.set(-0.27, -0.95, -0.22);
+playerBody.add(handL);
+
+// Bras droit
+const armR = new THREE.Mesh(armGeoL.clone(), bodyMat);
+armR.position.set(0.24, -0.72, -0.20);
+armR.rotation.z = -0.18;
+playerBody.add(armR);
+
+// Main droite
+const handR = new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 6), skinMat);
+handR.position.set(0.27, -0.95, -0.22);
+playerBody.add(handR);
+
+// Ventre / bas torse
+const belly = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.22, 0.16), clothMat);
+belly.position.set(0, -1.05, -0.21);
+playerBody.add(belly);
+
+// Jambe gauche
+const legGeo = new THREE.CylinderGeometry(0.072, 0.060, 0.52, 7);
+const legL = new THREE.Mesh(legGeo, bodyMat);
+legL.position.set(-0.095, -1.32, -0.20);
+playerBody.add(legL);
+
+// Jambe droite
+const legR = new THREE.Mesh(legGeo.clone(), bodyMat);
+legR.position.set(0.095, -1.32, -0.20);
+playerBody.add(legR);
+
+// Pied gauche
+const footGeo = new THREE.BoxGeometry(0.11, 0.07, 0.20);
+const footL = new THREE.Mesh(footGeo, bodyMat);
+footL.position.set(-0.095, -1.60, -0.14);
+playerBody.add(footL);
+
+// Pied droit
+const footR = new THREE.Mesh(footGeo.clone(), bodyMat);
+footR.position.set(0.095, -1.60, -0.14);
+playerBody.add(footR);
+
+// Rendu : le corps ne doit pas être visible dans le miroir du fog / skybox
+// On le met sur un layer séparé si besoin — ici on gère juste l'opacité selon pitch
+playerBody.traverse(obj => {
+    if (obj.isMesh) {
+        obj.castShadow = false;
+        obj.renderOrder = 999;
+        // Évite le clipping avec le near plane
+        obj.material = obj.material.clone();
+        obj.material.depthTest = true;
+    }
+});
+
+/* ─── ANIMATION CORPS ────────────────────────────────── */
+// Balancement à la marche
+let walkCycle = 0;
+const _euler = new THREE.Euler();
+
+function updatePlayerBody(dt) {
+    const moving = keys.z || keys.s || keys.q || keys.d;
+    const run = keys.shift && moving;
+
+    if (moving) walkCycle += dt * (run ? 8.5 : 5.0);
+
+    // Balancement bras/jambes
+    const swing = Math.sin(walkCycle) * (moving ? 0.18 : 0);
+    armL.rotation.x  =  swing;
+    armR.rotation.x  = -swing;
+    handL.position.y = -0.95 + Math.sin(walkCycle) * (moving ? 0.06 : 0);
+    handR.position.y = -0.95 - Math.sin(walkCycle) * (moving ? 0.06 : 0);
+    legL.rotation.x  = -swing * 0.7;
+    legR.rotation.x  =  swing * 0.7;
+
+    // Pitch caméra → opacité du corps (visible seulement quand on regarde en bas)
+    _euler.setFromQuaternion(camera.quaternion, 'YXZ');
+    const pitch = _euler.x; // négatif = regard en bas
+    // Commence à apparaître à -15°, pleinement visible à -40°
+    const t = Math.min(1, Math.max(0, (-pitch - 0.26) / 0.42));
+    playerBody.traverse(obj => {
+        if (obj.isMesh) obj.material.opacity = t;
+        if (obj.isMesh) obj.material.transparent = true;
+    });
+}
+
+
 /* ─── GÉOMÉTRIES PARTAGÉES ───────────────────────────── */
 const GEO={
     grass:    new THREE.CylinderGeometry(0.015,0.04,0.5,3),
@@ -901,6 +1010,7 @@ function animate(){
     updateChunks(camera.position.x,camera.position.z);
     // Mise à jour montagnes chaque frame (très léger, juste des positions)
     updateMountainPositions();
+    updatePlayerBody(dt);
     renderer.render(scene,camera);
 }
 animate();
