@@ -491,10 +491,11 @@ function updatePlayerBody(dt) {
     handR.position.y = -0.94 - Math.sin(walkCycle) * (moving ? 0.07 : 0);
     legL.rotation.x = -swing * 0.65; legR.rotation.x = swing * 0.65;
 
-    _euler.setFromQuaternion(camera.quaternion, 'YXZ');
-    const pitch = _euler.x;
-    // -0.20 rad ≈ -11° → commence, -0.55 rad ≈ -31° → plein
-    const t = Math.min(1, Math.max(0, (-pitch - 0.20) / 0.35));
+    // Pitch via le vecteur "bas" de la caméra en world space
+    const down = new THREE.Vector3(0, -1, 0);
+    const camDown = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+    // camDown.y = 1 quand on regarde droit en bas, -1 quand droit en haut
+    const t = Math.min(1, Math.max(0, (camDown.y - 0.15) / 0.5));
     for (const m of _bodyMeshes) m.material.opacity = t;
 }
 
