@@ -422,8 +422,8 @@ function flowerMat(hex){ if(!flowerCache[hex])flowerCache[hex]=new THREE.MeshSta
 scene.add(camera);
 
 function makeBodyMesh(geo, color) {
-    const mat = new THREE.MeshStandardMaterial({
-        color, fog: false, transparent: true, opacity: 0, depthTest: false
+    const mat = new THREE.MeshBasicMaterial({
+        color, fog: false, transparent: true, opacity: 1, depthTest: false, depthWrite: false
     });
     const m = new THREE.Mesh(geo, mat);
     m.renderOrder = 999;
@@ -484,19 +484,12 @@ function updatePlayerBody(dt) {
     const moving = keys.z || keys.s || keys.q || keys.d;
     const run = keys.shift && moving;
     if (moving) walkCycle += dt * (run ? 9.0 : 5.5);
-
     const swing = Math.sin(walkCycle) * (moving ? 0.20 : 0);
     armL.rotation.x =  swing; armR.rotation.x = -swing;
     handL.position.y = -0.94 + Math.sin(walkCycle) * (moving ? 0.07 : 0);
     handR.position.y = -0.94 - Math.sin(walkCycle) * (moving ? 0.07 : 0);
     legL.rotation.x = -swing * 0.65; legR.rotation.x = swing * 0.65;
-
-    // Pitch via le vecteur "bas" de la caméra en world space
-    const down = new THREE.Vector3(0, -1, 0);
-    const camDown = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
-    // camDown.y = 1 quand on regarde droit en bas, -1 quand droit en haut
-    const t = Math.min(1, Math.max(0, (camDown.y - 0.15) / 0.5));
-    for (const m of _bodyMeshes) m.material.opacity = t;
+    for (const m of _bodyMeshes) m.material.opacity = 1;
 }
 
 
