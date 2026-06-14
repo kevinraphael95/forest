@@ -419,110 +419,108 @@ function flowerMat(hex){ if(!flowerCache[hex])flowerCache[hex]=new THREE.MeshSta
 
 
 /* ─── CORPS JOUEUR (Immersive First Person) ──────────── */
-const playerBody = new THREE.Group();
-camera.add(playerBody); // attaché à la caméra
-scene.add(camera);      // IMPORTANT : la caméra doit être dans la scène
+// Layer 1 = corps joueur uniquement (exclut le fog)
+const BODY_LAYER = 1;
+camera.layers.enable(BODY_LAYER);
 
-const bodyMat   = new THREE.MeshStandardMaterial({ color: 0x2a1a0e }); // cuir sombre
-const clothMat  = new THREE.MeshStandardMaterial({ color: 0x1a2a1a }); // vêtement vert forêt
-const skinMat   = new THREE.MeshStandardMaterial({ color: 0xc68642 }); // peau
+const playerBody = new THREE.Group();
+scene.add(camera);
+
+// Matériaux sans fog
+const bodyMat  = new THREE.MeshStandardMaterial({ color: 0x2a1a0e, fog: false });
+const clothMat = new THREE.MeshStandardMaterial({ color: 0x1a2a1a, fog: false });
+const skinMat  = new THREE.MeshStandardMaterial({ color: 0xc68642, fog: false });
+
+function makeBodyMesh(geo, mat) {
+    const m = new THREE.Mesh(geo, mat.clone());
+    m.layers.set(BODY_LAYER);
+    m.renderOrder = 999;
+    m.material.depthTest = false;
+    m.material.transparent = true;
+    m.material.opacity = 0;
+    m.material.fog = false;
+    return m;
+}
 
 // Torse
-const torso = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.48, 0.18), clothMat);
-torso.position.set(0, -0.62, -0.22);
+const torso = makeBodyMesh(new THREE.BoxGeometry(0.40, 0.50, 0.20), clothMat);
+torso.position.set(0, -0.55, -0.30);
 playerBody.add(torso);
 
+// Ventre
+const belly = makeBodyMesh(new THREE.BoxGeometry(0.36, 0.24, 0.18), clothMat);
+belly.position.set(0, -1.00, -0.29);
+playerBody.add(belly);
+
 // Bras gauche
-const armGeoL = new THREE.CylinderGeometry(0.055, 0.048, 0.42, 7);
-const armL = new THREE.Mesh(armGeoL, bodyMat);
-armL.position.set(-0.24, -0.72, -0.20);
-armL.rotation.z = 0.18;
+const armL = makeBodyMesh(new THREE.CylinderGeometry(0.058, 0.050, 0.44, 7), bodyMat);
+armL.position.set(-0.26, -0.70, -0.28);
+armL.rotation.z = 0.20;
 playerBody.add(armL);
 
 // Main gauche
-const handL = new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 6), skinMat);
-handL.position.set(-0.27, -0.95, -0.22);
+const handL = makeBodyMesh(new THREE.SphereGeometry(0.065, 6, 6), skinMat);
+handL.position.set(-0.29, -0.94, -0.30);
 playerBody.add(handL);
 
 // Bras droit
-const armR = new THREE.Mesh(armGeoL.clone(), bodyMat);
-armR.position.set(0.24, -0.72, -0.20);
-armR.rotation.z = -0.18;
+const armR = makeBodyMesh(new THREE.CylinderGeometry(0.058, 0.050, 0.44, 7), bodyMat);
+armR.position.set(0.26, -0.70, -0.28);
+armR.rotation.z = -0.20;
 playerBody.add(armR);
 
 // Main droite
-const handR = new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 6), skinMat);
-handR.position.set(0.27, -0.95, -0.22);
+const handR = makeBodyMesh(new THREE.SphereGeometry(0.065, 6, 6), skinMat);
+handR.position.set(0.29, -0.94, -0.30);
 playerBody.add(handR);
 
-// Ventre / bas torse
-const belly = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.22, 0.16), clothMat);
-belly.position.set(0, -1.05, -0.21);
-playerBody.add(belly);
-
 // Jambe gauche
-const legGeo = new THREE.CylinderGeometry(0.072, 0.060, 0.52, 7);
-const legL = new THREE.Mesh(legGeo, bodyMat);
-legL.position.set(-0.095, -1.32, -0.20);
+const legL = makeBodyMesh(new THREE.CylinderGeometry(0.075, 0.062, 0.55, 7), bodyMat);
+legL.position.set(-0.10, -1.30, -0.27);
 playerBody.add(legL);
 
 // Jambe droite
-const legR = new THREE.Mesh(legGeo.clone(), bodyMat);
-legR.position.set(0.095, -1.32, -0.20);
+const legR = makeBodyMesh(new THREE.CylinderGeometry(0.075, 0.062, 0.55, 7), bodyMat);
+legR.position.set(0.10, -1.30, -0.27);
 playerBody.add(legR);
 
-// Pied gauche
-const footGeo = new THREE.BoxGeometry(0.11, 0.07, 0.20);
-const footL = new THREE.Mesh(footGeo, bodyMat);
-footL.position.set(-0.095, -1.60, -0.14);
+// Pieds
+const footGeo = new THREE.BoxGeometry(0.12, 0.08, 0.22);
+const footL = makeBodyMesh(footGeo, bodyMat);
+footL.position.set(-0.10, -1.58, -0.20);
 playerBody.add(footL);
-
-// Pied droit
-const footR = new THREE.Mesh(footGeo.clone(), bodyMat);
-footR.position.set(0.095, -1.60, -0.14);
+const footR = makeBodyMesh(footGeo.clone(), bodyMat);
+footR.position.set(0.10, -1.58, -0.20);
 playerBody.add(footR);
 
-// Rendu : le corps ne doit pas être visible dans le miroir du fog / skybox
-// On le met sur un layer séparé si besoin — ici on gère juste l'opacité selon pitch
-playerBody.traverse(obj => {
-    if (obj.isMesh) {
-        obj.castShadow = false;
-        obj.renderOrder = 999;
-        // Évite le clipping avec le near plane
-        obj.material = obj.material.clone();
-        obj.material.depthTest = true;
-    }
-});
+// Attacher à la caméra
+camera.add(playerBody);
 
 /* ─── ANIMATION CORPS ────────────────────────────────── */
-// Balancement à la marche
 let walkCycle = 0;
 const _euler = new THREE.Euler();
+const _bodyMeshes = [];
+playerBody.traverse(obj => { if (obj.isMesh) _bodyMeshes.push(obj); });
 
 function updatePlayerBody(dt) {
     const moving = keys.z || keys.s || keys.q || keys.d;
     const run = keys.shift && moving;
+    if (moving) walkCycle += dt * (run ? 9.0 : 5.5);
 
-    if (moving) walkCycle += dt * (run ? 8.5 : 5.0);
-
-    // Balancement bras/jambes
-    const swing = Math.sin(walkCycle) * (moving ? 0.18 : 0);
+    const swing = Math.sin(walkCycle) * (moving ? 0.20 : 0);
     armL.rotation.x  =  swing;
     armR.rotation.x  = -swing;
-    handL.position.y = -0.95 + Math.sin(walkCycle) * (moving ? 0.06 : 0);
-    handR.position.y = -0.95 - Math.sin(walkCycle) * (moving ? 0.06 : 0);
-    legL.rotation.x  = -swing * 0.7;
-    legR.rotation.x  =  swing * 0.7;
+    handL.position.y = -0.94 + Math.sin(walkCycle) * (moving ? 0.07 : 0);
+    handR.position.y = -0.94 - Math.sin(walkCycle) * (moving ? 0.07 : 0);
+    legL.rotation.x  = -swing * 0.65;
+    legR.rotation.x  =  swing * 0.65;
 
-    // Pitch caméra → opacité du corps (visible seulement quand on regarde en bas)
+    // Opacité selon pitch (regarde en bas = corps visible)
     _euler.setFromQuaternion(camera.quaternion, 'YXZ');
-    const pitch = _euler.x; // négatif = regard en bas
-    // Commence à apparaître à -15°, pleinement visible à -40°
-    const t = Math.min(1, Math.max(0, (-pitch - 0.26) / 0.42));
-    playerBody.traverse(obj => {
-        if (obj.isMesh) obj.material.opacity = t;
-        if (obj.isMesh) obj.material.transparent = true;
-    });
+    const pitch = _euler.x;
+    // -0.20 rad ≈ -11° → commence, -0.55 rad ≈ -31° → plein
+    const t = Math.min(1, Math.max(0, (-pitch - 0.20) / 0.35));
+    for (const m of _bodyMeshes) m.material.opacity = t;
 }
 
 
