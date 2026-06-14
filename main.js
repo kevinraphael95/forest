@@ -480,24 +480,6 @@ function updatePlayerBody(dt) {
     legL.rotation.x = -swing * 0.65; legR.rotation.x = swing * 0.65;
 }
 
-/* ─── ANIMATION CORPS ────────────────────────────────── */
-let walkCycle = 0;
-const _euler = new THREE.Euler();
-const _bodyMeshes = [];
-playerBody.traverse(obj => { if (obj.isMesh) _bodyMeshes.push(obj); });
-
-function updatePlayerBody(dt) {
-    const moving = keys.z || keys.s || keys.q || keys.d;
-    const run = keys.shift && moving;
-    if (moving) walkCycle += dt * (run ? 9.0 : 5.5);
-    const swing = Math.sin(walkCycle) * (moving ? 0.20 : 0);
-    armL.rotation.x =  swing; armR.rotation.x = -swing;
-    handL.position.y = -0.94 + Math.sin(walkCycle) * (moving ? 0.07 : 0);
-    handR.position.y = -0.94 - Math.sin(walkCycle) * (moving ? 0.07 : 0);
-    legL.rotation.x = -swing * 0.65; legR.rotation.x = swing * 0.65;
-    for (const m of _bodyMeshes) m.material.opacity = 1;
-}
-
 
 /* ─── GÉOMÉTRIES PARTAGÉES ───────────────────────────── */
 const GEO={
