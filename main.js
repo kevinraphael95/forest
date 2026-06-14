@@ -16,37 +16,49 @@ renderer.setSize(innerWidth, innerHeight);
 renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.toneMapping = THREE.NoToneMapping;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
 renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
 document.body.appendChild(renderer.domElement);
 
 /* ─── SCENE / CAMERA ─────────────────────────────────── */
 const scene = new THREE.Scene();
-scene.fog = new THREE.Fog(0x7a9e8a, 20, 70);
+// Fog exponentiel carré : horizon doux à la Firewatch
+scene.fog = new THREE.FogExp2(0x7a9e8a, 0.007);
 const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.1, 2000);
 camera.position.set(0, 10, 0);
 
-/* ─── SKYBOX ─────────────────────────────────────────── */
+/* ─── SKYBOX CANVAS ──────────────────────────────────── */
+// Gradient 4 stops pour un ciel plus riche (top, mid-sky, horizon, bas)
 const SKY_CANVAS = document.createElement('canvas');
-SKY_CANVAS.width = 2; SKY_CANVAS.height = 256;
+SKY_CANVAS.width = 2; SKY_CANVAS.height = 512;
 const SKY_CTX = SKY_CANVAS.getContext('2d');
 const skyTex = new THREE.CanvasTexture(SKY_CANVAS);
 scene.background = skyTex;
+
+// Palette Firewatch — couleurs soigneusement choisies
 const SKY = {
-    day:    { top:[0.10,0.44,0.83], hor:[0.49,0.78,0.94] },
-    sunset: { top:[0.23,0.06,0.38], hor:[1.00,0.27,0.00] },
-    night:  { top:[0.04,0.08,0.21], hor:[0.09,0.13,0.25] },
-    dawn:   { top:[0.23,0.06,0.38], hor:[1.00,0.40,0.13] },
+    day:    { top:[0.20,0.52,0.90], mid:[0.45,0.72,0.95], hor:[0.72,0.88,0.97], bot:[0.60,0.82,0.90] },
+    sunset: { top:[0.07,0.04,0.22], mid:[0.55,0.12,0.08], hor:[1.00,0.38,0.05], bot:[1.00,0.60,0.18] },
+    night:  { top:[0.02,0.04,0.16], mid:[0.04,0.07,0.18], hor:[0.07,0.10,0.22], bot:[0.06,0.09,0.20] },
+    dawn:   { top:[0.10,0.04,0.22], mid:[0.40,0.10,0.25], hor:[1.00,0.48,0.16], bot:[1.00,0.70,0.30] },
 };
+
 function lerp3(a,b,t){ return [a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t,a[2]+(b[2]-a[2])*t]; }
 function toCSS(rgb){ return `rgb(${rgb[0]*255|0},${rgb[1]*255|0},${rgb[2]*255|0})`; }
-let _top=SKY.day.top.slice(), _hor=SKY.day.hor.slice();
-function setSky(s){ _top=s.top.slice(); _hor=s.hor.slice(); }
-function lerpSky(a,b,t){ _top=lerp3(a.top,b.top,t); _hor=lerp3(a.hor,b.hor,t); }
+let _top=SKY.day.top.slice(), _mid=SKY.day.mid.slice(), _hor=SKY.day.hor.slice(), _bot=SKY.day.bot.slice();
+function setSky(s){ _top=s.top.slice(); _mid=s.mid.slice(); _hor=s.hor.slice(); _bot=s.bot.slice(); }
+function lerpSky(a,b,t){
+    _top=lerp3(a.top,b.top,t); _mid=lerp3(a.mid,b.mid,t);
+    _hor=lerp3(a.hor,b.hor,t); _bot=lerp3(a.bot,b.bot,t);
+}
 function drawSky(){
-    const g=SKY_CTX.createLinearGradient(0,0,0,256);
-    g.addColorStop(0,toCSS(_top)); g.addColorStop(1,toCSS(_hor));
-    SKY_CTX.fillStyle=g; SKY_CTX.fillRect(0,0,2,256); skyTex.needsUpdate=true;
+    const g=SKY_CTX.createLinearGradient(0,0,0,512);
+    g.addColorStop(0, toCSS(_top));
+    g.addColorStop(0.38, toCSS(_mid));
+    g.addColorStop(0.72, toCSS(_hor));
+    g.addColorStop(1,    toCSS(_bot));
+    SKY_CTX.fillStyle=g; SKY_CTX.fillRect(0,0,2,512); skyTex.needsUpdate=true;
 }
 
 /* ─── LUMIÈRES ───────────────────────────────────────── */
@@ -55,8 +67,8 @@ scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xfff5e0, 3.0);
 sun.castShadow = true;
 sun.shadow.mapSize.setScalar(1024);
-sun.shadow.camera.left = sun.shadow.camera.bottom = -120;
-sun.shadow.camera.right = sun.shadow.camera.top = 120;
+sun.shadow.camera.left = sun.shadow.camera.bottom = -160;
+sun.shadow.camera.right = sun.shadow.camera.top = 160;
 sun.shadow.camera.far = 1500;
 scene.add(sun);
 const moonLight = new THREE.DirectionalLight(0x4466bb, 0);
@@ -108,8 +120,167 @@ const starMat=new THREE.ShaderMaterial({
 const starsObj=new THREE.Points(starGeo,starMat);
 scene.add(starsObj);
 
+/* ─── MONTAGNES LOINTAINES — style Firewatch ─────────── */
+// Plusieurs couches de silhouettes à distances croissantes
+// Chaque couche est un anneau de sprites CanvasTexture
+const mountainLayers = [];
+
+function makeMountainTexture(opts) {
+    // opts: { width, height, peaks, peakH, color, jagged, snowRatio }
+    const { width=2048, height=512, peaks=14, peakH=0.65, color, jagged=0.3, snowRatio=0 } = opts;
+    const c = document.createElement('canvas');
+    c.width = width; c.height = height;
+    const ctx = c.getContext('2d');
+
+    // Génère une ligne de crête aléatoire mais déterministe
+    const pts = [];
+    const segW = width / (peaks * 2);
+    for (let i = 0; i <= peaks * 2; i++) {
+        const x = i * segW;
+        // alternance pic / vallée avec variation
+        const isP = (i % 2 === 1);
+        const base = isP ? peakH : (0.05 + Math.random() * 0.15);
+        const jitter = (Math.random() - 0.5) * jagged * peakH;
+        pts.push({ x, y: Math.max(0.02, Math.min(0.98, base + jitter)) });
+    }
+    // Ajoute points de bord
+    pts.unshift({ x: 0, y: pts[0].y });
+    pts.push({ x: width, y: pts[pts.length-1].y });
+
+    // Rempli silhouette
+    ctx.beginPath();
+    ctx.moveTo(0, height);
+    ctx.lineTo(pts[0].x, height * (1 - pts[0].y));
+    for (let i = 1; i < pts.length; i++) {
+        const prev = pts[i-1], cur = pts[i];
+        const cpx = (prev.x + cur.x) / 2;
+        ctx.bezierCurveTo(cpx, height*(1-prev.y), cpx, height*(1-cur.y), cur.x, height*(1-cur.y));
+    }
+    ctx.lineTo(width, height);
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
+
+    // Neige sur les sommets (couches lointaines)
+    if (snowRatio > 0) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'source-atop';
+        // Gradient vertical blanc en haut
+        const sg = ctx.createLinearGradient(0, 0, 0, height * (1 - peakH * snowRatio));
+        sg.addColorStop(0, 'rgba(220,230,245,0.85)');
+        sg.addColorStop(1, 'rgba(220,230,245,0)');
+        ctx.fillStyle = sg;
+        ctx.fillRect(0, 0, width, height);
+        ctx.restore();
+    }
+
+    return new THREE.CanvasTexture(c);
+}
+
+function buildMountainRing(radius, count, yBase, scaleH, texOpts, name) {
+    const tex = makeMountainTexture(texOpts);
+    const sprites = [];
+    for (let i = 0; i < count; i++) {
+        const angle = (i / count) * Math.PI * 2;
+        const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+            map: tex,
+            transparent: true,
+            depthWrite: false,
+            depthTest: true,
+            blending: THREE.NormalBlending,
+            opacity: texOpts.opacity ?? 0.92,
+        }));
+        // Chaque sprite couvre un arc du cercle
+        sp.scale.set(radius * Math.PI * 2 / count * 1.05, scaleH, 1);
+        sp.position.set(Math.cos(angle) * radius, yBase, Math.sin(angle) * radius);
+        sp._angle = angle;
+        sp._radius = radius;
+        sp._yBase = yBase;
+        scene.add(sp);
+        sprites.push(sp);
+    }
+    mountainLayers.push({ sprites, radius, yBase });
+}
+
+// Couche 1 — premier plan montagneux (la plus proche, plus sombre)
+buildMountainRing(320, 20, -8, 55, {
+    width: 1024, height: 256, peaks: 8, peakH: 0.55, jagged: 0.4, snowRatio: 0,
+    color: 'rgba(18,32,18,1)', opacity: 0.88,
+}, 'near');
+
+// Couche 2 — montagnes mid (légèrement bleutées)
+buildMountainRing(520, 22, -14, 80, {
+    width: 1024, height: 256, peaks: 10, peakH: 0.62, jagged: 0.28, snowRatio: 0.15,
+    color: 'rgba(28,45,55,1)', opacity: 0.82,
+}, 'mid');
+
+// Couche 3 — chaîne lointaine (bleu-gris atmosphérique)
+buildMountainRing(780, 24, -20, 110, {
+    width: 1024, height: 256, peaks: 12, peakH: 0.70, jagged: 0.20, snowRatio: 0.30,
+    color: 'rgba(45,68,85,1)', opacity: 0.72,
+}, 'far');
+
+// Couche 4 — horizon montagneux très lointain (quasi silhouette vaporeuse)
+buildMountainRing(1100, 28, -28, 140, {
+    width: 1024, height: 256, peaks: 14, peakH: 0.75, jagged: 0.14, snowRatio: 0.45,
+    color: 'rgba(65,88,105,1)', opacity: 0.55,
+}, 'vfar');
+
+// Couleurs de montagne interpolées par heure (atmospheric scattering Firewatch)
+const MTN_COLORS = {
+    //         L1(near)        L2(mid)          L3(far)          L4(vfar)
+    day:    ['#0f2012','#1a2f3a','#2d4458','#425870'],
+    sunset: ['#1a0a08','#5a1a08','#7a2510','#8a3a20'],
+    night:  ['#050a0e','#0a1018','#101820','#182030'],
+    dawn:   ['#100806','#2a1510','#3a2020','#503030'],
+};
+const _mtnColors = mountainLayers.map(() => new THREE.Color());
+let _mtnT = 0; // 0=day,1=sunset,2=night,3=dawn
+
+function updateMountainColors(angle) {
+    const PI = Math.PI;
+    // Correspondance angle → palette (même logique que le ciel)
+    let palA, palB, t;
+    if (angle < PI*0.20)      { palA='dawn';   palB='day';    t=angle/(PI*0.20); }
+    else if (angle < PI*0.75) { palA='day';    palB='day';    t=0; }
+    else if (angle < PI*1.10) { palA='day';    palB='sunset'; t=(angle-PI*0.75)/(PI*0.35); }
+    else if (angle < PI*1.40) { palA='sunset'; palB='night';  t=(angle-PI*1.10)/(PI*0.30); }
+    else if (angle < PI*1.75) { palA='night';  palB='night';  t=0; }
+    else                      { palA='night';  palB='dawn';   t=(angle-PI*1.75)/(PI*0.25); }
+
+    mountainLayers.forEach((layer, li) => {
+        const cA = new THREE.Color(MTN_COLORS[palA][li]);
+        const cB = new THREE.Color(MTN_COLORS[palB][li]);
+        const col = cA.lerp(cB, t);
+        layer.sprites.forEach(sp => { sp.material.color.copy(col); });
+    });
+}
+
+function updateMountainPositions() {
+    const cp = camera.position;
+    mountainLayers.forEach(layer => {
+        layer.sprites.forEach(sp => {
+            sp.position.set(
+                cp.x + Math.cos(sp._angle) * sp._radius,
+                sp._yBase + cp.y * 0.05, // légère parallaxe verticale
+                cp.z + Math.sin(sp._angle) * sp._radius
+            );
+        });
+    });
+}
+
 /* ─── CYCLE JOUR/NUIT ────────────────────────────────── */
 const DAY_DURATION=1200, ORBIT_R=1400;
+
+// Couleurs de brouillard Firewatch
+const FOG_COLORS = {
+    day:    new THREE.Color(0xb8d4e8),  // brume bleue claire
+    sunset: new THREE.Color(0xd4622a),  // orange chaud
+    night:  new THREE.Color(0x080e18),  // nuit quasi-noir
+    dawn:   new THREE.Color(0xc4623a),  // rose-orangé
+};
+const _fogCol = new THREE.Color();
+
 function updateDayNight(elapsed){
     const angle=((elapsed/DAY_DURATION)*Math.PI*2)%(Math.PI*2);
     const sinA=Math.sin(angle),sf=Math.max(0,sinA),sfS=sf*sf*(3-2*sf),mf=Math.max(0,-sinA),mfS=mf*mf*(3-2*mf);
@@ -123,18 +294,53 @@ function updateDayNight(elapsed){
     sun.intensity=0.05+sfS*3.0; moonLight.intensity=0.20+mfS*0.5; hemi.intensity=0.30+sfS*0.9;
     sunSprite.material.opacity=Math.pow(sf,0.35); sunGlow.material.opacity=Math.pow(sf,0.5)*0.8;
     moonSprite.material.opacity=Math.pow(mf,0.35); moonGlow.material.opacity=Math.pow(mf,0.5)*0.7;
-    scene.fog.color.lerpColors(new THREE.Color(0x04091f),new THREE.Color(0x7a9e8a),sfS);
-    scene.fog.near=20+sfS*20; scene.fog.far=70+sfS*50;
+
+    // Fog exponentiel — densité varie selon l'heure
+    const fogDayDensity   = 0.0045; // ~220u de visibilité
+    const fogNightDensity = 0.010;
+    const fogSunsetDensity= 0.0065;
+    let fogDensity, fogColor;
+
+    const a = angle, PI = Math.PI;
+    if(a < PI*0.20) {
+        fogDensity = fogSunsetDensity + (fogDayDensity-fogSunsetDensity)*(a/(PI*0.20));
+        _fogCol.lerpColors(FOG_COLORS.dawn, FOG_COLORS.day, a/(PI*0.20));
+        lerpSky(SKY.dawn,SKY.day,a/(PI*0.20));
+    } else if(a < PI*0.75) {
+        fogDensity = fogDayDensity;
+        _fogCol.copy(FOG_COLORS.day);
+        setSky(SKY.day);
+    } else if(a < PI*1.10) {
+        const t=(a-PI*0.75)/(PI*0.35);
+        fogDensity = fogDayDensity + (fogSunsetDensity-fogDayDensity)*t;
+        _fogCol.lerpColors(FOG_COLORS.day, FOG_COLORS.sunset, t);
+        lerpSky(SKY.day,SKY.sunset,t);
+    } else if(a < PI*1.40) {
+        const t=(a-PI*1.10)/(PI*0.30);
+        fogDensity = fogSunsetDensity + (fogNightDensity-fogSunsetDensity)*t;
+        _fogCol.lerpColors(FOG_COLORS.sunset, FOG_COLORS.night, t);
+        lerpSky(SKY.sunset,SKY.night,t);
+    } else if(a < PI*1.75) {
+        fogDensity = fogNightDensity;
+        _fogCol.copy(FOG_COLORS.night);
+        setSky(SKY.night);
+    } else {
+        const t=(a-PI*1.75)/(PI*0.25);
+        fogDensity = fogNightDensity + (fogSunsetDensity-fogNightDensity)*t;
+        _fogCol.lerpColors(FOG_COLORS.night, FOG_COLORS.dawn, t);
+        lerpSky(SKY.night,SKY.dawn,t);
+    }
+
+    scene.fog.density = fogDensity;
+    scene.fog.color.copy(_fogCol);
+
     starMat.uniforms.uOp.value=Math.max(0,1-sfS*2.0)*0.95;
     starMat.uniforms.uT.value=elapsed;
     starsObj.position.copy(cp);
-    const a=angle,PI=Math.PI;
-    if(a<PI*0.20)      lerpSky(SKY.dawn,SKY.day,a/(PI*0.20));
-    else if(a<PI*0.75) setSky(SKY.day);
-    else if(a<PI*1.10) lerpSky(SKY.day,SKY.sunset,(a-PI*0.75)/(PI*0.35));
-    else if(a<PI*1.40) lerpSky(SKY.sunset,SKY.night,(a-PI*1.10)/(PI*0.30));
-    else if(a<PI*1.75) setSky(SKY.night);
-    else               lerpSky(SKY.night,SKY.dawn,(a-PI*1.75)/(PI*0.25));
+
+    // Mise à jour couleurs montagnes
+    updateMountainColors(angle);
+
     drawSky();
 }
 
@@ -221,41 +427,27 @@ const GEO={
     mushStem: new THREE.CylinderGeometry(0.1,0.12,0.4,6),
     mushCap:  new THREE.SphereGeometry(0.5,8,5,0,Math.PI*2,0,Math.PI*0.55),
     mushSpot: new THREE.SphereGeometry(0.07,4,4),
-    // Tour — unités de base scalées
-    towLogV:  new THREE.CylinderGeometry(0.55,0.65,1,9),  // tronc vertical, scale Y
-    towLogH:  new THREE.CylinderGeometry(0.16,0.16,1,7),  // poutre ronde, scale X ou Z
-    towPlank: new THREE.BoxGeometry(1,0.18,0.65),          // planche/marche, scale X
-    towRailH: new THREE.CylinderGeometry(0.07,0.07,1,5),  // rail horiz, scale X
-    towBarV:  new THREE.CylinderGeometry(0.05,0.05,1.15,5), // barreau vertical
+    towLogV:  new THREE.CylinderGeometry(0.55,0.65,1,9),
+    towLogH:  new THREE.CylinderGeometry(0.16,0.16,1,7),
+    towPlank: new THREE.BoxGeometry(1,0.18,0.65),
+    towRailH: new THREE.CylinderGeometry(0.07,0.07,1,5),
+    towBarV:  new THREE.CylinderGeometry(0.05,0.05,1.15,5),
 };
 
 /* ─── GLOBAUX ────────────────────────────────────────── */
 const windObjects=[], fireflyData=[], globalColliders=[];
 
-/* ─────────────────────────────────────────────────────────
-   TOUR D'OBSERVATION
-   - 4 gros piliers en troncs (rayon ~0.55-0.65), aspect bois brut
-   - Renforts en logs ronds horizontaux
-   - Escalier zigzag sur face Z- (8 volées de 8 marches)
-   - Plateforme 5×5u à TOWER_H, plancher en planches
-   - Garde-corps 3 côtés + ouverture côté escalier
-   - Toit conique
-───────────────────────────────────────────────────────── */
-const TOWER_H  = 40;  // hauteur plancher plateforme
-const PLT_HALF = 2.6; // demi-largeur plateforme (~5.2u)
+/* ─── TOUR D'OBSERVATION ──────────────────────────────── */
+const TOWER_H  = 40;
+const PLT_HALF = 2.6;
 
-// Fréquence : une tour par cellule 5×5 de chunks = ~400u
-// Spawn : (22,22) dans chunk (0,0)
 function chunkHasTower(cx,cz){
     if(cx===0&&cz===0) return true;
-    // Cellule 5×5
     const cellX=Math.floor(cx/5), cellZ=Math.floor(cz/5);
-    if(cellX===0&&cellZ===0) return false; // cellule spawn déjà gérée
-    // Hash du chunk courant
+    if(cellX===0&&cellZ===0) return false;
     let h=(cx*374761393+cz*668265263)^0xdeadbeef;
     h=Math.imul(h^(h>>>16),0x45d9f3b); h^=h>>>16;
     const val=(h>>>0)/0xffffffff;
-    // Vrai seulement si ce chunk a le hash max dans sa cellule 5×5
     for(let dx=-4;dx<=4;dx++){
         for(let dz=-4;dz<=4;dz++){
             if(dx===0&&dz===0) continue;
@@ -269,16 +461,10 @@ function chunkHasTower(cx,cz){
     return true;
 }
 
-
-/* ─── TOURS D'OBSERVATION ──────────────────────────────────────── */
-
 function buildTower(wx,wz,grp,lc){
     const gy=findY(wx,wz);
     const tg=new THREE.Group();
-
     const pillarH=TOWER_H+4;
-
-    // ── 4 PILIERS ────────────────────────────────────────
     const pDef=[
         {ox:-PLT_HALF,oz:-PLT_HALF,rb:0.65,rt:0.55},
         {ox: PLT_HALF,oz:-PLT_HALF,rb:0.62,rt:0.52},
@@ -291,8 +477,6 @@ function buildTower(wx,wz,grp,lc){
         mesh.castShadow=true; tg.add(mesh);
         lc.push({type:'cylinder',x:wx+p.ox,y:gy-4,z:wz+p.oz,r:p.rb+0.15,h:pillarH});
     }
-
-    // ── RENFORTS HORIZONTAUX ─────────────────────────────
     const beamLen=PLT_HALF*2+0.5;
     for(let y=6;y<TOWER_H-2;y+=7){
         for(const oz of [-PLT_HALF,PLT_HALF]){
@@ -304,134 +488,67 @@ function buildTower(wx,wz,grp,lc){
             b.rotation.x=Math.PI/2; b.position.set(ox,y+0.4,0); tg.add(b);
         }
     }
-
-
-    // ── ÉCHELLE — collée à la face Z+ ────────────────────
-        const LADDER_W    = 1.2; 
-        const LADDER_Z    = PLT_HALF + 0.3;
-        const RUNG_COUNT  = Math.floor(TOWER_H / 0.8);
-        const RUNG_SPACING= TOWER_H / RUNG_COUNT;
-    
-        // Montants
-        const postL = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, TOWER_H + 0.5, 7), MAT.towLog);
-        postL.position.set(-LADDER_W * 0.5, TOWER_H * 0.5, LADDER_Z);
-        tg.add(postL);
-    
-        const postR = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, TOWER_H + 0.5, 7), MAT.towLog);
-        postR.position.set(LADDER_W * 0.5, TOWER_H * 0.5, LADDER_Z);
-        tg.add(postR);
-    
-        // Barreaux
-        for(let i=1; i<=RUNG_COUNT; i++){
-            const ry = i * RUNG_SPACING;
-            const rung = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, LADDER_W, 6), MAT.towLog);
-            rung.rotation.z = Math.PI / 2;
-            rung.position.set(0, ry, LADDER_Z);
-            tg.add(rung);
-        }
-    
-        // ZONE DE COLLISION ÉCHELLE (Ajustée pour transition douce)
-        lc.push({
-            type: 'ladder',
-            minX: wx - LADDER_W * 0.6, 
-            maxX: wx + LADDER_W * 0.6,
-            minZ: wz + LADDER_Z - 0.4, 
-            maxZ: wz + LADDER_Z + 0.4,
-            bottom: gy,
-            top: gy + TOWER_H - 0.2 // S'arrête juste AVANT le haut pour lâcher le joueur
-        });
-
-    // ── PLANCHER PLATEFORME ───────────────────────────────
+    const LADDER_W=1.2,LADDER_Z=PLT_HALF+0.3;
+    const RUNG_COUNT=Math.floor(TOWER_H/0.8),RUNG_SPACING=TOWER_H/RUNG_COUNT;
+    const postL=new THREE.Mesh(new THREE.CylinderGeometry(0.09,0.09,TOWER_H+0.5,7),MAT.towLog);
+    postL.position.set(-LADDER_W*0.5,TOWER_H*0.5,LADDER_Z); tg.add(postL);
+    const postR=new THREE.Mesh(new THREE.CylinderGeometry(0.09,0.09,TOWER_H+0.5,7),MAT.towLog);
+    postR.position.set(LADDER_W*0.5,TOWER_H*0.5,LADDER_Z); tg.add(postR);
+    for(let i=1;i<=RUNG_COUNT;i++){
+        const ry=i*RUNG_SPACING;
+        const rung=new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.05,LADDER_W,6),MAT.towLog);
+        rung.rotation.z=Math.PI/2; rung.position.set(0,ry,LADDER_Z); tg.add(rung);
+    }
+    lc.push({type:'ladder',minX:wx-LADDER_W*0.6,maxX:wx+LADDER_W*0.6,minZ:wz+LADDER_Z-0.4,maxZ:wz+LADDER_Z+0.4,bottom:gy,top:gy+TOWER_H-0.2});
     const floorW=PLT_HALF*2+0.15;
     for(let i=0;i<9;i++){
-        const t=i/8, pz=-PLT_HALF+t*PLT_HALF*2;
+        const t=i/8,pz=-PLT_HALF+t*PLT_HALF*2;
         const pl=new THREE.Mesh(GEO.towPlank,MAT.towPlank);
         pl.scale.set(floorW,1,1); pl.position.set(0,TOWER_H,pz);
         pl.receiveShadow=true; tg.add(pl);
     }
     lc.push({type:'cylinder',x:wx,y:gy+TOWER_H-0.1,z:wz,r:PLT_HALF+0.5,h:0.4});
-
-    // Poutres soutien plancher
     for(const oz of [-PLT_HALF*0.5,PLT_HALF*0.5]){
         const sb=new THREE.Mesh(new THREE.CylinderGeometry(0.18,0.18,floorW+0.3,7),MAT.towLog);
         sb.rotation.z=Math.PI/2; sb.position.set(0,TOWER_H-0.28,oz); tg.add(sb);
     }
-
-    // ── GARDE-CORPS plateforme ────────────────────────────
-        const railTop=TOWER_H+1.15, railMid=TOWER_H+0.58;
-        const gcSides=[
-            // [0,           PLT_HALF+0.1, 0,         floorW], // Côté échelle (laissé ouvert)
-            [-PLT_HALF-0.1, 0,          Math.PI/2, floorW],
-            [ PLT_HALF+0.1, 0,          Math.PI/2, floorW],
-            [0,          -PLT_HALF-0.1, 0,         floorW],
-        ];
-    
-        for(const [cx,cz,ry,len] of gcSides){
-            // Visuel des barres horizontales
-            for(const rh of [railMid,railTop]){
-                const r=new THREE.Mesh(new THREE.CylinderGeometry(0.08,0.08,len,5),MAT.towRail);
-                r.rotation.set(0,ry,Math.PI/2); r.position.set(cx,rh,cz); tg.add(r);
-            }
-            // Visuel des barreaux verticaux
-            const nb=Math.ceil(len/0.62)+1;
-            for(let i=0;i<=nb;i++){
-                const t2=(i/nb-0.5)*len;
-                const bx=ry===0?cx+t2:cx, bz=ry===0?cz:cz+t2;
-                const bar=new THREE.Mesh(GEO.towBarV,MAT.towRail);
-                bar.position.set(bx,TOWER_H+0.72,bz); tg.add(bar);
-            }
-    
-            // AJOUT DE LA COLLISION (Le mur invisible)
-            // On place 3 points de collision par rail pour boucher tout le long
-            for(let j=0; j<3; j++) {
-                const offset = (j/2 - 0.5) * len;
-                const colX = ry === 0 ? wx + cx + offset : wx + cx;
-                const colZ = ry === 0 ? wz + cz : wz + cz + offset;
-                
-                lc.push({
-                    type: 'cylinder',
-                    x: colX,
-                    y: gy + TOWER_H, 
-                    z: colZ,
-                    r: 0.5, // Rayon pour bloquer le joueur
-                    h: 1.5  // Hauteur du mur
-                });
-            }
+    const railTop=TOWER_H+1.15,railMid=TOWER_H+0.58;
+    const gcSides=[
+        [-PLT_HALF-0.1,0,Math.PI/2,floorW],
+        [PLT_HALF+0.1,0,Math.PI/2,floorW],
+        [0,-PLT_HALF-0.1,0,floorW],
+    ];
+    for(const [cx,cz,ry,len] of gcSides){
+        for(const rh of [railMid,railTop]){
+            const r=new THREE.Mesh(new THREE.CylinderGeometry(0.08,0.08,len,5),MAT.towRail);
+            r.rotation.set(0,ry,Math.PI/2); r.position.set(cx,rh,cz); tg.add(r);
         }
-
-    // ── TOIT CARRÉ — porté par 4 petits piliers ──────────
+        const nb=Math.ceil(len/0.62)+1;
+        for(let i=0;i<=nb;i++){
+            const t2=(i/nb-0.5)*len;
+            const bx=ry===0?cx+t2:cx,bz=ry===0?cz:cz+t2;
+            const bar=new THREE.Mesh(GEO.towBarV,MAT.towRail);
+            bar.position.set(bx,TOWER_H+0.72,bz); tg.add(bar);
+        }
+        // Mur continu : collider tous les 0.5u pour boucher tout le garde-corps
+        const nCol = Math.ceil(len / 0.5) + 1;
+        for(let j=0;j<=nCol;j++){
+            const offset=(j/nCol - 0.5)*len;
+            const colX = ry===0 ? wx+cx+offset : wx+cx;
+            const colZ = ry===0 ? wz+cz : wz+cz+offset;
+            lc.push({type:'cylinder',x:colX,y:gy+TOWER_H,z:colZ,r:0.30,h:1.5});
+        }
+    }
     const roofPillarH=5;
     for(const [px,pz] of [[-PLT_HALF,-PLT_HALF],[PLT_HALF,-PLT_HALF],[PLT_HALF,PLT_HALF],[-PLT_HALF,PLT_HALF]]){
         const rp=new THREE.Mesh(new THREE.CylinderGeometry(0.12,0.12,roofPillarH,7),MAT.towLog);
         rp.position.set(px,railTop+roofPillarH/2,pz); tg.add(rp);
     }
-
-    // Toit carré = 4 pans inclinés
-    const roofBase=railTop+roofPillarH;
-    const roofH=4, roofHalf=PLT_HALF+1.0;
-    // Pan avant (Z+)
-    const panGeo=new THREE.BufferGeometry();
-    const verts=new Float32Array([
-        -roofHalf,0, roofHalf,
-         roofHalf,0, roofHalf,
-         0,       roofH, 0,
-    ]);
-    panGeo.setAttribute('position',new THREE.BufferAttribute(verts,3));
-    panGeo.computeVertexNormals();
-    for(const [rx,rz] of [[0,0],[Math.PI/2,0],[Math.PI,0],[Math.PI*1.5,0],[0,Math.PI/2],[0,Math.PI*1.5]]){
-        // on utilise ConeGeometry à 4 faces = toit pyramidal carré
-    }
-    // Toit pyramidal carré simplement avec ConeGeometry 4 segments
-    const roofMesh=new THREE.Mesh(
-        new THREE.ConeGeometry(roofHalf*Math.SQRT2, roofH, 4),
-        MAT.towLog
-    );
-    roofMesh.rotation.y=Math.PI/4; // aligner les coins avec la tour
-    roofMesh.position.set(0,roofBase+roofH*0.5,0);
+    const roofBase=railTop+roofPillarH,roofH=4,roofHalf=PLT_HALF+1.0;
+    const roofMesh=new THREE.Mesh(new THREE.ConeGeometry(roofHalf*Math.SQRT2,roofH,4),MAT.towLog);
+    roofMesh.rotation.y=Math.PI/4; roofMesh.position.set(0,roofBase+roofH*0.5,0);
     roofMesh.castShadow=true; tg.add(roofMesh);
-
-    tg.position.set(wx,gy,wz);
-    grp.add(tg);
+    tg.position.set(wx,gy,wz); grp.add(tg);
     return {wx,wz,clearR:PLT_HALF+6};
 }
 
@@ -452,7 +569,11 @@ function buildMushroom(wx,wz,gy,r,grp){
 }
 
 /* ─── CHUNKS ─────────────────────────────────────────── */
-const CHUNK_SIZE=80, CHUNK_SEGS=14, CHUNK_RADIUS=2;
+// CHUNK_RADIUS augmenté à 3 pour voir plus loin sans coût excessif
+// (les chunks lointains ont moins d'arbres grâce au LOD implicite)
+// CHUNK_SEGS doit donner CHUNK_SIZE/CHUNK_SEGS = multiple de HSTEP(0.5)
+// 80/16 = 5.0 → multiple de 0.5 ✓  (était 14 → 80/14≈5.71 → coutures !)
+const CHUNK_SIZE=80, CHUNK_SEGS=16, CHUNK_RADIUS=3;
 const loadedChunks=new Map(), chunkFadeIn=new Map();
 function seededRng(seed){
     let s=(seed^0xdeadbeef)|0;
@@ -472,13 +593,32 @@ function _buildChunk(cx,cz,key){
     const r=seededRng(cx*73856093^cz*19349663);
     const grp=new THREE.Group(),lc=[];
 
-    /* SOL */
-    const tgeo=new THREE.PlaneGeometry(CHUNK_SIZE,CHUNK_SIZE,CHUNK_SEGS,CHUNK_SEGS);
-    const vp=tgeo.attributes.position.array;
-    for(let i=0;i<vp.length;i+=3) vp[i+2]=fbm(oX+vp[i],oZ-vp[i+1]);
+    // Distance au centre pour LOD
+    const distFromOrigin = Math.sqrt(cx*cx+cz*cz);
+    const isLOD = distFromOrigin > 1.5; // chunks lointains = LOD réduit
+
+    /* SOL — grille uniforme pour éviter les coutures entre chunks
+       Tous les chunks utilisent CHUNK_SEGS, les chunks LOD simplifient
+       seulement les arbres/détails, PAS le terrain. Le pas de grille est
+       toujours CHUNK_SIZE/CHUNK_SEGS, donc les bords se partagent
+       exactement les mêmes coordonnées monde entre chunks voisins. */
+    const GRID = CHUNK_SEGS; // toujours identique, même en LOD
+    const STEP = CHUNK_SIZE / GRID;
+    const tgeo = new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE, GRID, GRID);
+    const vp = tgeo.attributes.position.array;
+    // PlaneGeometry en XY avant rotation : x = col, y = row (inversé en Z après rotation)
+    // On recalcule chaque vertex avec heightAt qui snappe à HSTEP
+    for (let i = 0; i < vp.length; i += 3) {
+        // vp[i]=x local, vp[i+1]=y local (sera Z monde après rotation)
+        const wx = oX + vp[i];
+        const wz = oZ - vp[i + 1]; // PlaneGeometry Y → Z monde (rotation.x = -PI/2)
+        vp[i + 2] = heightAt(wx, wz); // Z local = hauteur, deviendra Y monde
+    }
     tgeo.computeVertexNormals();
-    const terr=new THREE.Mesh(tgeo,MAT.ground);
-    terr.rotation.x=-Math.PI/2; terr.position.set(oX,0,oZ); terr.receiveShadow=true;
+    const terr = new THREE.Mesh(tgeo, MAT.ground);
+    terr.rotation.x = -Math.PI / 2;
+    terr.position.set(oX, 0, oZ);
+    terr.receiveShadow = true;
     grp.add(terr);
 
     /* TOUR */
@@ -502,8 +642,9 @@ function _buildChunk(cx,cz,key){
     }
     function occupy(wx,wz,rad){ occupied.push({x:wx,z:wz,r:rad}); }
 
-    /* ARBRES */
-    const treeN=7+(r()*7|0),tpts=[];
+    /* ARBRES — moins dans les chunks LOD */
+    const treeN = isLOD ? 4+(r()*4|0) : 7+(r()*7|0);
+    const tpts=[];
     for(let i=0;i<treeN;i++){
         let wx,wz,ok=false,tries=0;
         do{
@@ -514,58 +655,71 @@ function _buildChunk(cx,cz,key){
         tpts.push([wx,wz]); occupy(wx,wz,8);
         const gy=findY(wx,wz),h=28+r()*18,tr=1.4+r()*1.0,trunkH=h*(0.28+r()*0.08),tgr=new THREE.Group();
         const trunk=new THREE.Mesh(new THREE.CylinderGeometry(tr*0.55,tr*1.4,trunkH+6,9),MAT.trunk);
-        trunk.position.y=trunkH/2-3; trunk.castShadow=true; tgr.add(trunk);
-        const layers=9+(r()*5|0),foliageH=h-trunkH;
+        trunk.position.y=trunkH/2-3; trunk.castShadow=!isLOD; tgr.add(trunk);
+        // Layers réduits en LOD
+        const layers = isLOD ? 5+(r()*3|0) : 9+(r()*5|0);
+        const foliageH=h-trunkH;
         for(let li=0;li<layers;li++){
             const ratio=li/(layers-1),coneY=trunkH+ratio*foliageH*0.90,radius=tr*4.5*(1-ratio*0.72)+1.5,coneH=(foliageH/layers)*2.2;
-            const cone=new THREE.Mesh(new THREE.ConeGeometry(radius,coneH,8),CONE_MATS[(r()*3)|0]);
+            const cone=new THREE.Mesh(new THREE.ConeGeometry(radius,coneH,isLOD?5:8),CONE_MATS[(r()*3)|0]);
             cone.position.y=coneY; tgr.add(cone);
-            windObjects.push({mesh:cone,phase:r()*10,speed:0.5,amp:0.012});
+            if(!isLOD) windObjects.push({mesh:cone,phase:r()*10,speed:0.5,amp:0.012});
         }
         tgr.position.set(wx,gy,wz); grp.add(tgr);
         lc.push({type:'cylinder',x:wx,y:gy,z:wz,r:tr*1.7,h:trunkH+6});
     }
 
-    /* ROCHERS */
-    for(let i=0,n=1+(r()*3|0);i<n;i++){
-        let wx,wz,tries=0;
-        do{ wx=oX+(r()-0.5)*CHUNK_SIZE*0.88; wz=oZ+(r()-0.5)*CHUNK_SIZE*0.88; } while(!canPlace(wx,wz,3)&&++tries<15);
-        if(tries>=15) continue;
-        const gy=findY(wx,wz),sx=1.0+r()*2.6,sy=sx*(0.5+r()*0.5),sz=1.0+r()*2.6;
-        const rock=new THREE.Mesh(GEO.rock,MAT.rock);
-        rock.scale.set(sx,sy,sz); rock.rotation.set((r()-0.5)*0.4,r()*Math.PI*2,(r()-0.5)*0.4);
-        rock.position.set(wx,gy+sy*0.35,wz);
-        rock.castShadow=rock.receiveShadow=true; grp.add(rock);
-        lc.push({type:'sphere',x:wx,y:gy+sy*0.48,z:wz,r:Math.max(sx,sz)*0.9,topY:gy+sy*0.48+sy*0.85});
-        occupy(wx,wz,Math.max(sx,sz)*1.2);
-    }
+    // Contenu détaillé uniquement pour chunks proches
+    if(!isLOD){
+        /* ROCHERS */
+        for(let i=0,n=1+(r()*3|0);i<n;i++){
+            let wx,wz,tries=0;
+            do{ wx=oX+(r()-0.5)*CHUNK_SIZE*0.88; wz=oZ+(r()-0.5)*CHUNK_SIZE*0.88; } while(!canPlace(wx,wz,3)&&++tries<15);
+            if(tries>=15) continue;
+            const gy=findY(wx,wz),sx=1.0+r()*2.6,sy=sx*(0.5+r()*0.5),sz=1.0+r()*2.6;
+            const rock=new THREE.Mesh(GEO.rock,MAT.rock);
+            rock.scale.set(sx,sy,sz); rock.rotation.set((r()-0.5)*0.4,r()*Math.PI*2,(r()-0.5)*0.4);
+            rock.position.set(wx,gy+sy*0.35,wz);
+            rock.castShadow=rock.receiveShadow=true; grp.add(rock);
+            lc.push({type:'sphere',x:wx,y:gy+sy*0.48,z:wz,r:Math.max(sx,sz)*0.9,topY:gy+sy*0.48+sy*0.85});
+            occupy(wx,wz,Math.max(sx,sz)*1.2);
+        }
 
-    /* FLEURS */
-    for(let i=0,n=25+(r()*50|0);i<n;i++){
-        let wx,wz,tries=0;
-        do{ wx=oX+(r()-0.5)*CHUNK_SIZE*0.9; wz=oZ+(r()-0.5)*CHUNK_SIZE*0.9; } while(!canPlace(wx,wz,1.5)&&++tries<10);
-        if(tries>=10) continue;
-        const gy=findY(wx,wz);
-        const st=new THREE.Mesh(GEO.stem,MAT.stem); st.position.set(wx,gy+0.15,wz); grp.add(st);
-        const hd=new THREE.Mesh(GEO.flower,flowerMat(FLOWER_COLORS[(r()*FLOWER_COLORS.length)|0]));
-        hd.position.set(wx,gy+0.65,wz); grp.add(hd);
-        occupy(wx,wz,0.8);
-    }
+        /* FLEURS */
+        for(let i=0,n=20+(r()*35|0);i<n;i++){
+            let wx,wz,tries=0;
+            do{ wx=oX+(r()-0.5)*CHUNK_SIZE*0.9; wz=oZ+(r()-0.5)*CHUNK_SIZE*0.9; } while(!canPlace(wx,wz,1.5)&&++tries<10);
+            if(tries>=10) continue;
+            const gy=findY(wx,wz);
+            const st=new THREE.Mesh(GEO.stem,MAT.stem); st.position.set(wx,gy+0.15,wz); grp.add(st);
+            const hd=new THREE.Mesh(GEO.flower,flowerMat(FLOWER_COLORS[(r()*FLOWER_COLORS.length)|0]));
+            hd.position.set(wx,gy+0.65,wz); grp.add(hd);
+            occupy(wx,wz,0.8);
+        }
 
-    /* CHAMPIGNONS */
-    for(let i=0,n=1+(r()*4|0);i<n;i++){
-        let wx,wz,tries=0;
-        do{ wx=oX+(r()-0.5)*CHUNK_SIZE*0.88; wz=oZ+(r()-0.5)*CHUNK_SIZE*0.88; } while(!canPlace(wx,wz,2)&&++tries<15);
-        if(tries>=15) continue;
-        buildMushroom(wx,wz,findY(wx,wz),r,grp); occupy(wx,wz,1.5);
-        if(r()>0.5) for(let c=0,cn=2+(r()*3|0);c<cn;c++){
-            const ox=wx+(r()-0.5)*2.5,oz=wz+(r()-0.5)*2.5;
-            if(canPlace(ox,oz,1)){ buildMushroom(ox,oz,findY(ox,oz),r,grp); occupy(ox,oz,1); }
+        /* CHAMPIGNONS */
+        for(let i=0,n=1+(r()*4|0);i<n;i++){
+            let wx,wz,tries=0;
+            do{ wx=oX+(r()-0.5)*CHUNK_SIZE*0.88; wz=oZ+(r()-0.5)*CHUNK_SIZE*0.88; } while(!canPlace(wx,wz,2)&&++tries<15);
+            if(tries>=15) continue;
+            buildMushroom(wx,wz,findY(wx,wz),r,grp); occupy(wx,wz,1.5);
+            if(r()>0.5) for(let c=0,cn=2+(r()*3|0);c<cn;c++){
+                const ox=wx+(r()-0.5)*2.5,oz=wz+(r()-0.5)*2.5;
+                if(canPlace(ox,oz,1)){ buildMushroom(ox,oz,findY(ox,oz),r,grp); occupy(ox,oz,1); }
+            }
+        }
+
+        /* LUCIOLES */
+        for(let i=0,n=2+(r()*6|0);i<n;i++){
+            const wx=oX+(r()-0.5)*CHUNK_SIZE*0.88,wz=oZ+(r()-0.5)*CHUNK_SIZE*0.88;
+            const fy=findY(wx,wz)+2+r()*4;
+            const m=new THREE.Mesh(GEO.ff,MAT.ff); m.position.set(wx,fy,wz); grp.add(m);
+            fireflyData.push({mesh:m,baseY:fy,phase:r()*10,ox:wx,oz:wz});
         }
     }
 
-    /* HERBE */
-    const gn=50+(r()*50|0);
+    /* HERBE — réduite en LOD */
+    const gn = isLOD ? 20+(r()*20|0) : 45+(r()*40|0);
     const gm=new THREE.InstancedMesh(GEO.grass,MAT.grass,gn);
     gm.frustumCulled=false;
     const dm=new THREE.Object3D();
@@ -576,14 +730,6 @@ function _buildChunk(cx,cz,key){
         gm.setMatrixAt(i,dm.matrix);
     }
     gm.instanceMatrix.needsUpdate=true; grp.add(gm);
-
-    /* LUCIOLES */
-    for(let i=0,n=2+(r()*6|0);i<n;i++){
-        const wx=oX+(r()-0.5)*CHUNK_SIZE*0.88,wz=oZ+(r()-0.5)*CHUNK_SIZE*0.88;
-        const fy=findY(wx,wz)+2+r()*4;
-        const m=new THREE.Mesh(GEO.ff,MAT.ff); m.position.set(wx,fy,wz); grp.add(m);
-        fireflyData.push({mesh:m,baseY:fy,phase:r()*10,ox:wx,oz:wz});
-    }
 
     /* FADE-IN */
     grp.traverse(obj=>{
@@ -637,19 +783,14 @@ const PLAYER_R=0.4,PLAYER_H=1.8;
 function resolveColliders(nx, ny, nz) {
     let onTop = false;
     let isOnLadder = false;
-    
     for (const c of globalColliders) {
-        // Détection spéciale pour l'échelle
         if (c.type === 'ladder') {
             if (nx > c.minX && nx < c.maxX && nz > c.minZ && nz < c.maxZ) {
                 const pBot = ny - PLAYER_H;
-                if (ny > c.bottom && pBot < c.top) {
-                    isOnLadder = true;
-                }
+                if (ny > c.bottom && pBot < c.top) { isOnLadder = true; }
             }
-            continue; // Ne bloque pas le mouvement horizontal
+            continue;
         }
-
         if (c.type === 'cylinder') {
             const dx = nx - c.x, dz = nz - c.z, dXZ = Math.sqrt(dx * dx + dz * dz), cTop = c.y + c.h, pBot = ny - PLAYER_H;
             if (dXZ < c.r + PLAYER_R && ny > c.y && pBot < cTop) {
@@ -686,47 +827,30 @@ function updateMovement(dt) {
     const run = keys.shift && (keys.z || keys.s || keys.q || keys.d);
     _fwd.set(0, 0, -1).applyQuaternion(camera.quaternion); _fwd.y = 0; _fwd.normalize();
     _right.set(1, 0, 0).applyQuaternion(camera.quaternion); _right.y = 0; _right.normalize();
-
-    // Vérifier l'état des collisions à la position actuelle
     const check = resolveColliders(camera.position.x, camera.position.y, camera.position.z);
-
     if (check.isOnLadder) {
-        // --- LOGIQUE ÉCHELLE ---
-        velocity.set(0, 0, 0); 
-        jumpVel = 0; 
-        grounded = true;
-
+        velocity.set(0, 0, 0); jumpVel = 0; grounded = true;
         const climbSpeed = 0.18;
-        if (keys.z) camera.position.y += climbSpeed; // Monter
-        if (keys.s) camera.position.y -= climbSpeed; // Descendre
-        
-        // Permet de se détacher de l'échelle en bougeant
+        if (keys.z) camera.position.y += climbSpeed;
+        if (keys.s) camera.position.y -= climbSpeed;
         if (keys.q) camera.position.addScaledVector(_right, -0.05);
         if (keys.d) camera.position.addScaledVector(_right, 0.05);
-        if (keys.s && !keys.z) camera.position.addScaledVector(_fwd, -0.03); // Reculer pour descendre
-
+        if (keys.s && !keys.z) camera.position.addScaledVector(_fwd, -0.03);
     } else {
-        // --- LOGIQUE NORMALE ---
         const slope = 1 - Math.abs(terrainNormal(camera.position.x, camera.position.z).y);
         const accel = (run ? 0.065 : 0.032) * (1 - slope * 0.5);
-
         if (keys.z) velocity.addScaledVector(_fwd, accel);
         if (keys.s) velocity.addScaledVector(_fwd, -accel);
         if (keys.q) velocity.addScaledVector(_right, -accel);
         if (keys.d) velocity.addScaledVector(_right, accel);
-
         velocity.multiplyScalar(0.88);
-        
         let nx = camera.position.x + velocity.x;
         let ny = camera.position.y;
         let nz = camera.position.z + velocity.z;
-
-        jumpVel = Math.max(jumpVel - 0.016, -1.2); 
+        jumpVel = Math.max(jumpVel - 0.016, -1.2);
         ny += jumpVel;
-
         const moveRes = resolveColliders(nx, ny, nz);
         nx = moveRes.x; ny = moveRes.y; nz = moveRes.z;
-
         const tgy = findY(nx, nz) + PLAYER_H;
         if (ny <= tgy) {
             if (jumpVel <= 0 && !moveRes.onTop) {
@@ -739,7 +863,6 @@ function updateMovement(dt) {
             smoothGroundY = ny;
             if (jumpVel <= 0) { jumpVel = 0; grounded = true; }
         } else { smoothGroundY = null; grounded = false; }
-        
         camera.position.set(nx, ny, nz);
     }
 }
@@ -776,6 +899,8 @@ function animate(){
     updateDayNight(elapsed);
     if(controls.isLocked) updateMovement(dt);
     updateChunks(camera.position.x,camera.position.z);
+    // Mise à jour montagnes chaque frame (très léger, juste des positions)
+    updateMountainPositions();
     renderer.render(scene,camera);
 }
 animate();
