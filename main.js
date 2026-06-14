@@ -984,6 +984,7 @@ function animate(){
     // Mise à jour montagnes chaque frame (très léger, juste des positions)
     updateMountainPositions();
     updatePlayerBody(dt);
+    console.log('bodyMeshes:', _bodyMeshes.length, 'opacity:', _bodyMeshes[0]?.material.opacity, 'pitch:', _euler.x);
     renderer.render(scene,camera);
 }
 animate();
