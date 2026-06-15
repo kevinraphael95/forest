@@ -17,7 +17,7 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 4.0;
+renderer.toneMappingExposure = 1.05;
 renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
 document.body.appendChild(renderer.domElement);
 
@@ -38,10 +38,10 @@ scene.background = skyTex;
 
 // Palette Firewatch — couleurs soigneusement choisies
 const SKY = {
-    day:    { top:[0.10,0.28,0.65], mid:[0.30,0.55,0.85], hor:[0.65,0.82,0.95], bot:[0.75,0.88,0.97] },
-    sunset: { top:[0.05,0.08,0.28], mid:[0.25,0.18,0.35], hor:[0.90,0.45,0.15], bot:[0.98,0.68,0.30] },
-    night:  { top:[0.01,0.02,0.08], mid:[0.02,0.04,0.12], hor:[0.04,0.06,0.16], bot:[0.03,0.05,0.14] },
-    dawn:   { top:[0.05,0.06,0.20], mid:[0.35,0.18,0.28], hor:[0.92,0.55,0.25], bot:[0.98,0.75,0.45] },
+    day:    { top:[0.20,0.52,0.90], mid:[0.45,0.72,0.95], hor:[0.72,0.88,0.97], bot:[0.60,0.82,0.90] },
+    sunset: { top:[0.07,0.04,0.22], mid:[0.55,0.12,0.08], hor:[1.00,0.38,0.05], bot:[1.00,0.60,0.18] },
+    night:  { top:[0.02,0.04,0.16], mid:[0.04,0.07,0.18], hor:[0.07,0.10,0.22], bot:[0.06,0.09,0.20] },
+    dawn:   { top:[0.10,0.04,0.22], mid:[0.40,0.10,0.25], hor:[1.00,0.48,0.16], bot:[1.00,0.70,0.30] },
 };
 
 function lerp3(a,b,t){ return [a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t,a[2]+(b[2]-a[2])*t]; }
@@ -62,9 +62,9 @@ function drawSky(){
 }
 
 /* ─── LUMIÈRES ───────────────────────────────────────── */
-const hemi = new THREE.HemisphereLight(0xddeeff, 0x3d2f1b, 5.0);
+const hemi = new THREE.HemisphereLight(0xddeeff, 0x3d2f1b, 1.2);
 scene.add(hemi);
-const sun = new THREE.DirectionalLight(0xfff5e0, 12.0);
+const sun = new THREE.DirectionalLight(0xfff5e0, 3.0);
 sun.castShadow = true;
 sun.shadow.mapSize.setScalar(1024);
 sun.shadow.camera.left = sun.shadow.camera.bottom = -160;
@@ -274,10 +274,10 @@ const DAY_DURATION=1200, ORBIT_R=1400;
 
 // Couleurs de brouillard Firewatch
 const FOG_COLORS = {
-    day:    new THREE.Color(0xc8dff0),  // brume bleue claire
-    sunset: new THREE.Color(0xe8895a),  // orange doux, pas rouge cramé
-    night:  new THREE.Color(0x04080f),  // nuit quasi noire
-    dawn:   new THREE.Color(0xd4956a),  // rose-pêche
+    day:    new THREE.Color(0xb8d4e8),  // brume bleue claire
+    sunset: new THREE.Color(0xd4622a),  // orange chaud
+    night:  new THREE.Color(0x080e18),  // nuit quasi-noir
+    dawn:   new THREE.Color(0xc4623a),  // rose-orangé
 };
 const _fogCol = new THREE.Color();
 
@@ -294,10 +294,6 @@ function updateDayNight(elapsed){
     sun.intensity=0.05+sfS*3.0; moonLight.intensity=0.20+mfS*0.5; hemi.intensity=0.30+sfS*0.9;
     sunSprite.material.opacity=Math.pow(sf,0.35); sunGlow.material.opacity=Math.pow(sf,0.5)*0.8;
     moonSprite.material.opacity=Math.pow(mf,0.35); moonGlow.material.opacity=Math.pow(mf,0.5)*0.7;
-    const hours = (angle / (Math.PI * 2) * 24 + 6) % 24;
-    const h = Math.floor(hours).toString().padStart(2,'0');
-    const m = Math.floor((hours % 1) * 60).toString().padStart(2,'0');
-    document.getElementById('time-display').textContent = h + ':' + m;
 
     // Fog exponentiel — densité varie selon l'heure
     const fogDayDensity   = 0.0045; // ~220u de visibilité
