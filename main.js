@@ -17,7 +17,7 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 2.5;
+renderer.toneMappingExposure = 4.0;
 renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
 document.body.appendChild(renderer.domElement);
 
@@ -62,9 +62,9 @@ function drawSky(){
 }
 
 /* ─── LUMIÈRES ───────────────────────────────────────── */
-const hemi = new THREE.HemisphereLight(0xddeeff, 0x3d2f1b, 3.5);
+const hemi = new THREE.HemisphereLight(0xddeeff, 0x3d2f1b, 5.0);
 scene.add(hemi);
-const sun = new THREE.DirectionalLight(0xfff5e0, 3.0);
+const sun = new THREE.DirectionalLight(0xfff5e0, 12.0);
 sun.castShadow = true;
 sun.shadow.mapSize.setScalar(1024);
 sun.shadow.camera.left = sun.shadow.camera.bottom = -160;
@@ -294,6 +294,10 @@ function updateDayNight(elapsed){
     sun.intensity=0.05+sfS*3.0; moonLight.intensity=0.20+mfS*0.5; hemi.intensity=0.30+sfS*0.9;
     sunSprite.material.opacity=Math.pow(sf,0.35); sunGlow.material.opacity=Math.pow(sf,0.5)*0.8;
     moonSprite.material.opacity=Math.pow(mf,0.35); moonGlow.material.opacity=Math.pow(mf,0.5)*0.7;
+    const hours = (angle / (Math.PI * 2) * 24 + 6) % 24;
+    const h = Math.floor(hours).toString().padStart(2,'0');
+    const m = Math.floor((hours % 1) * 60).toString().padStart(2,'0');
+    document.getElementById('time-display').textContent = h + ':' + m;
 
     // Fog exponentiel — densité varie selon l'heure
     const fogDayDensity   = 0.0045; // ~220u de visibilité
