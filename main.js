@@ -17,14 +17,14 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 4.0;
+renderer.toneMappingExposure = 1.8;
 renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
 document.body.appendChild(renderer.domElement);
 
 /* ─── SCENE / CAMERA ─────────────────────────────────── */
 const scene = new THREE.Scene();
 // Fog exponentiel carré : horizon doux à la Firewatch
-scene.fog = new THREE.FogExp2(0x7a9e8a, 0.012);
+scene.fog = new THREE.FogExp2(0x8abfa0, 0.018);
 const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.1, 2000);
 camera.position.set(0, 10, 0);
 
@@ -62,9 +62,9 @@ function drawSky(){
 }
 
 /* ─── LUMIÈRES ───────────────────────────────────────── */
-const hemi = new THREE.HemisphereLight(0xc8f0a0, 0x7a6a20, 5.0);
+const hemi = new THREE.HemisphereLight(0xc8f0a0, 0x7a6a20, 2.5);
 scene.add(hemi);
-const sun = new THREE.DirectionalLight(0xffe8a0, 12.0);
+const sun = new THREE.DirectionalLight(0xffe8a0, 6.0);
 sun.castShadow = true;
 sun.shadow.mapSize.setScalar(1024);
 sun.shadow.camera.left = sun.shadow.camera.bottom = -160;
@@ -404,7 +404,7 @@ const MAT={
     cone1:    new THREE.MeshStandardMaterial({color:0x3a7a22}),
     cone2:    new THREE.MeshStandardMaterial({color:0x4a9a2a}),
     rock:     new THREE.MeshStandardMaterial({color:0x8a7a5a,roughness:1,flatShading:true}),
-    ground:   new THREE.MeshStandardMaterial({color:0x5a7a2a,roughness:1}),
+    ground:   new THREE.MeshStandardMaterial({color:0x4a6820,roughness:1,vertexColors:false}),
     stem:     new THREE.MeshStandardMaterial({color:0x4a7a25}),
     grass:    new THREE.MeshStandardMaterial({color:0x6a9a30}),
     ff:       new THREE.MeshBasicMaterial({color:0xffffaa}),
@@ -647,30 +647,79 @@ function _buildChunk(cx,cz,key){
     function occupy(wx,wz,rad){ occupied.push({x:wx,z:wz,r:rad}); }
 
     /* ARBRES — moins dans les chunks LOD */
-    const treeN = isLOD ? 4+(r()*4|0) : 7+(r()*7|0);
+  
+    const treeN = isLOD ? 4+(r()*4|0) : 8+(r()*6|0);
     const tpts=[];
     for(let i=0;i<treeN;i++){
         let wx,wz,ok=false,tries=0;
         do{
             wx=oX+(r()-0.5)*CHUNK_SIZE*0.85; wz=oZ+(r()-0.5)*CHUNK_SIZE*0.85;
-            ok=canPlace(wx,wz,8)&&!tpts.some(p=>{const dx=p[0]-wx,dz=p[1]-wz;return dx*dx+dz*dz<16*16;});
+            ok=canPlace(wx,wz,6)&&!tpts.some(p=>{const dx=p[0]-wx,dz=p[1]-wz;return dx*dx+dz*dz<10*10;});
         } while(!ok&&++tries<20);
         if(tries>=20) continue;
-        tpts.push([wx,wz]); occupy(wx,wz,8);
-        const gy=findY(wx,wz),h=28+r()*18,tr=1.4+r()*1.0,trunkH=h*(0.28+r()*0.08),tgr=new THREE.Group();
-        const trunk=new THREE.Mesh(new THREE.CylinderGeometry(tr*0.55,tr*1.4,trunkH+6,9),MAT.trunk);
-        trunk.position.y=trunkH/2-3; trunk.castShadow=!isLOD; tgr.add(trunk);
-        // Layers réduits en LOD
-        const layers = isLOD ? 5+(r()*3|0) : 9+(r()*5|0);
-        const foliageH=h-trunkH;
-        for(let li=0;li<layers;li++){
-            const ratio=li/(layers-1),coneY=trunkH+ratio*foliageH*0.90,radius=tr*4.5*(1-ratio*0.72)+1.5,coneH=(foliageH/layers)*2.2;
-            const cone=new THREE.Mesh(new THREE.ConeGeometry(radius,coneH,isLOD?5:8),CONE_MATS[(r()*3)|0]);
-            cone.position.y=coneY; tgr.add(cone);
-            if(!isLOD) windObjects.push({mesh:cone,phase:r()*10,speed:0.5,amp:0.012});
+        tpts.push([wx,wz]); occupy(wx,wz,6);
+        const gy=findY(wx,wz);
+        const tgr=new THREE.Group();
+    
+        // Type d'arbre aléatoire : pin élancé ou feuillu
+        const isPine = r() > 0.35;
+        const h = isPine ? 22+r()*16 : 14+r()*10;
+        const tr = isPine ? 0.18+r()*0.12 : 0.25+r()*0.15;
+        const trunkH = isPine ? h*0.75 : h*0.55;
+    
+        // Tronc élancé style bouleau/pin
+        const trunkMat = new THREE.MeshStandardMaterial({
+            color: isPine ? 0x5a4a3a : 0xb0a898,
+            roughness: 0.95
+        });
+        const trunk = new THREE.Mesh(
+            new THREE.CylinderGeometry(tr*0.4, tr*1.1, trunkH+4, 7),
+            trunkMat
+        );
+        trunk.position.y = trunkH/2 - 2;
+        trunk.castShadow = !isLOD;
+        tgr.add(trunk);
+    
+        if(isPine){
+            // Pin : couches coniques serrées et sombres
+            const layers = isLOD ? 4+(r()*2|0) : 7+(r()*4|0);
+            const foliageH = h - trunkH*0.5;
+            for(let li=0;li<layers;li++){
+                const ratio = li/(layers-1);
+                const coneY = trunkH*0.5 + ratio*foliageH*0.85;
+                const radius = tr*18*(1-ratio*0.65)+0.8;
+                const coneH = (foliageH/layers)*1.8;
+                const col = [0x1a3a10, 0x1e4412, 0x224e14][li%3];
+                const cone = new THREE.Mesh(
+                    new THREE.ConeGeometry(radius, coneH, isLOD?5:7),
+                    new THREE.MeshStandardMaterial({color:col, roughness:0.9})
+                );
+                cone.position.y = coneY;
+                tgr.add(cone);
+                if(!isLOD) windObjects.push({mesh:cone,phase:r()*10,speed:0.4,amp:0.008});
+            }
+        } else {
+            // Feuillu : sphères de feuillage étalées, vert vif
+            const clusters = isLOD ? 3+(r()*2|0) : 6+(r()*4|0);
+            for(let ci=0;ci<clusters;ci++){
+                const cy = trunkH*0.6 + r()*h*0.4;
+                const cr = 2.5+r()*3.5;
+                const ox = (r()-0.5)*cr*1.2;
+                const oz2 = (r()-0.5)*cr*1.2;
+                const col = [0x3a8020, 0x4a9828, 0x2a6818, 0x5aaa30][ci%4];
+                const cluster = new THREE.Mesh(
+                    new THREE.SphereGeometry(cr, isLOD?4:6, isLOD?3:4),
+                    new THREE.MeshStandardMaterial({color:col, roughness:0.85})
+                );
+                cluster.position.set(ox, cy, oz2);
+                tgr.add(cluster);
+                if(!isLOD) windObjects.push({mesh:cluster,phase:r()*10,speed:0.3,amp:0.015});
+            }
         }
-        tgr.position.set(wx,gy,wz); grp.add(tgr);
-        lc.push({type:'cylinder',x:wx,y:gy,z:wz,r:tr*1.7,h:trunkH+6});
+    
+        tgr.position.set(wx,gy,wz);
+        grp.add(tgr);
+        lc.push({type:'cylinder',x:wx,y:gy,z:wz,r:tr*8,h:trunkH+4});
     }
 
     // Contenu détaillé uniquement pour chunks proches
