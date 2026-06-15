@@ -24,7 +24,7 @@ document.body.appendChild(renderer.domElement);
 /* ─── SCENE / CAMERA ─────────────────────────────────── */
 const scene = new THREE.Scene();
 // Fog exponentiel carré : horizon doux à la Firewatch
-scene.fog = new THREE.FogExp2(0x7a9e8a, 0.012);
+scene.fog = new THREE.FogExp2(0x7a9e8a, 0.007);
 const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.1, 2000);
 camera.position.set(0, 10, 0);
 
@@ -62,9 +62,9 @@ function drawSky(){
 }
 
 /* ─── LUMIÈRES ───────────────────────────────────────── */
-const hemi = new THREE.HemisphereLight(0xc8f0a0, 0x7a6a20, 5.0);
+const hemi = new THREE.HemisphereLight(0xddeeff, 0x3d2f1b, 5.0);
 scene.add(hemi);
-const sun = new THREE.DirectionalLight(0xffe8a0, 12.0);
+const sun = new THREE.DirectionalLight(0xfff5e0, 12.0);
 sun.castShadow = true;
 sun.shadow.mapSize.setScalar(1024);
 sun.shadow.camera.left = sun.shadow.camera.bottom = -160;
@@ -399,22 +399,22 @@ function terrainNormal(wx,wz){
 
 /* ─── MATÉRIAUX ──────────────────────────────────────── */
 const MAT={
-    trunk:    new THREE.MeshStandardMaterial({color:0x8a7a6a,roughness:0.9}),
-    cone0:    new THREE.MeshStandardMaterial({color:0x2d5a1b}),
-    cone1:    new THREE.MeshStandardMaterial({color:0x3a7a22}),
-    cone2:    new THREE.MeshStandardMaterial({color:0x4a9a2a}),
-    rock:     new THREE.MeshStandardMaterial({color:0x8a7a5a,roughness:1,flatShading:true}),
-    ground:   new THREE.MeshStandardMaterial({color:0x5a7a2a,roughness:1}),
-    stem:     new THREE.MeshStandardMaterial({color:0x4a7a25}),
-    grass:    new THREE.MeshStandardMaterial({color:0x6a9a30}),
+    trunk:    new THREE.MeshStandardMaterial({color:0x2a1a0e}),
+    cone0:    new THREE.MeshStandardMaterial({color:0x0f240f}),
+    cone1:    new THREE.MeshStandardMaterial({color:0x163016}),
+    cone2:    new THREE.MeshStandardMaterial({color:0x1c3d1c}),
+    rock:     new THREE.MeshStandardMaterial({color:0x777777,roughness:1,flatShading:true}),
+    ground:   new THREE.MeshStandardMaterial({color:0x243b1d,roughness:1}),
+    stem:     new THREE.MeshStandardMaterial({color:0x2d4c1e}),
+    grass:    new THREE.MeshStandardMaterial({color:0x3f6b2d}),
     ff:       new THREE.MeshBasicMaterial({color:0xffffaa}),
     mushCap:  new THREE.MeshStandardMaterial({color:0xcc3300}),
     mushCap2: new THREE.MeshStandardMaterial({color:0xaa2200}),
     mushSpot: new THREE.MeshStandardMaterial({color:0xffffff}),
     mushStem: new THREE.MeshStandardMaterial({color:0xe8dcc8}),
-    towLog:   new THREE.MeshStandardMaterial({color:0x6a5a3a,roughness:1.0}),
-    towPlank: new THREE.MeshStandardMaterial({color:0x7a6a4a,roughness:0.95}),
-    towRail:  new THREE.MeshStandardMaterial({color:0x5a4a2a,roughness:1.0}),
+    towLog:   new THREE.MeshStandardMaterial({color:0x1e0f06,roughness:1.0}),
+    towPlank: new THREE.MeshStandardMaterial({color:0x2c1a0a,roughness:0.95}),
+    towRail:  new THREE.MeshStandardMaterial({color:0x170c04,roughness:1.0}),
 };
 const CONE_MATS=[MAT.cone0,MAT.cone1,MAT.cone2];
 const FLOWER_COLORS=[0xff4444,0x4444ff,0xffff55,0xffffff,0xff66cc];
