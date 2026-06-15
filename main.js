@@ -17,7 +17,7 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.05;
+renderer.toneMappingExposure = 2.5;
 renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
 document.body.appendChild(renderer.domElement);
 
@@ -62,7 +62,7 @@ function drawSky(){
 }
 
 /* ─── LUMIÈRES ───────────────────────────────────────── */
-const hemi = new THREE.HemisphereLight(0xddeeff, 0x3d2f1b, 1.2);
+const hemi = new THREE.HemisphereLight(0xddeeff, 0x3d2f1b, 3.5);
 scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xfff5e0, 3.0);
 sun.castShadow = true;
