@@ -18,25 +18,23 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
-renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
+// ✅ PATCH #6 : SRGBColorSpace (test visuel — reviens à LinearSRGB si trop délavé)
+renderer.outputColorSpace = THREE.SRGBColorSpace;
 document.body.appendChild(renderer.domElement);
 
 /* ─── SCENE / CAMERA ─────────────────────────────────── */
 const scene = new THREE.Scene();
-// Fog exponentiel carré : horizon doux à la Firewatch
 scene.fog = new THREE.FogExp2(0x7a9e8a, 0.007);
 const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.1, 2000);
 camera.position.set(0, 10, 0);
 
 /* ─── SKYBOX CANVAS ──────────────────────────────────── */
-// Gradient 4 stops pour un ciel plus riche (top, mid-sky, horizon, bas)
 const SKY_CANVAS = document.createElement('canvas');
 SKY_CANVAS.width = 2; SKY_CANVAS.height = 512;
 const SKY_CTX = SKY_CANVAS.getContext('2d');
 const skyTex = new THREE.CanvasTexture(SKY_CANVAS);
 scene.background = skyTex;
 
-// Palette Firewatch — couleurs soigneusement choisies
 const SKY = {
     day:    { top:[0.10,0.28,0.65], mid:[0.30,0.55,0.85], hor:[0.65,0.82,0.95], bot:[0.75,0.88,0.97] },
     sunset: { top:[0.05,0.08,0.28], mid:[0.25,0.18,0.35], hor:[0.90,0.45,0.15], bot:[0.98,0.68,0.30] },
@@ -121,33 +119,26 @@ const starsObj=new THREE.Points(starGeo,starMat);
 scene.add(starsObj);
 
 /* ─── MONTAGNES LOINTAINES — style Firewatch ─────────── */
-// Plusieurs couches de silhouettes à distances croissantes
-// Chaque couche est un anneau de sprites CanvasTexture
 const mountainLayers = [];
 
 function makeMountainTexture(opts) {
-    // opts: { width, height, peaks, peakH, color, jagged, snowRatio }
     const { width=2048, height=512, peaks=14, peakH=0.65, color, jagged=0.3, snowRatio=0 } = opts;
     const c = document.createElement('canvas');
     c.width = width; c.height = height;
     const ctx = c.getContext('2d');
 
-    // Génère une ligne de crête aléatoire mais déterministe
     const pts = [];
     const segW = width / (peaks * 2);
     for (let i = 0; i <= peaks * 2; i++) {
         const x = i * segW;
-        // alternance pic / vallée avec variation
         const isP = (i % 2 === 1);
         const base = isP ? peakH : (0.05 + Math.random() * 0.15);
         const jitter = (Math.random() - 0.5) * jagged * peakH;
         pts.push({ x, y: Math.max(0.02, Math.min(0.98, base + jitter)) });
     }
-    // Ajoute points de bord
     pts.unshift({ x: 0, y: pts[0].y });
     pts.push({ x: width, y: pts[pts.length-1].y });
 
-    // Rempli silhouette
     ctx.beginPath();
     ctx.moveTo(0, height);
     ctx.lineTo(pts[0].x, height * (1 - pts[0].y));
@@ -161,11 +152,9 @@ function makeMountainTexture(opts) {
     ctx.fillStyle = color;
     ctx.fill();
 
-    // Neige sur les sommets (couches lointaines)
     if (snowRatio > 0) {
         ctx.save();
         ctx.globalCompositeOperation = 'source-atop';
-        // Gradient vertical blanc en haut
         const sg = ctx.createLinearGradient(0, 0, 0, height * (1 - peakH * snowRatio));
         sg.addColorStop(0, 'rgba(220,230,245,0.85)');
         sg.addColorStop(1, 'rgba(220,230,245,0)');
@@ -190,7 +179,6 @@ function buildMountainRing(radius, count, yBase, scaleH, texOpts, name) {
             blending: THREE.NormalBlending,
             opacity: texOpts.opacity ?? 0.92,
         }));
-        // Chaque sprite couvre un arc du cercle
         sp.scale.set(radius * Math.PI * 2 / count * 1.05, scaleH, 1);
         sp.position.set(Math.cos(angle) * radius, yBase, Math.sin(angle) * radius);
         sp._angle = angle;
@@ -202,44 +190,36 @@ function buildMountainRing(radius, count, yBase, scaleH, texOpts, name) {
     mountainLayers.push({ sprites, radius, yBase });
 }
 
-// Couche 1 — premier plan montagneux (la plus proche, plus sombre)
 buildMountainRing(320, 20, -8, 55, {
     width: 1024, height: 256, peaks: 8, peakH: 0.55, jagged: 0.4, snowRatio: 0,
     color: 'rgba(18,32,18,1)', opacity: 0.88,
 }, 'near');
 
-// Couche 2 — montagnes mid (légèrement bleutées)
 buildMountainRing(520, 22, -14, 80, {
     width: 1024, height: 256, peaks: 10, peakH: 0.62, jagged: 0.28, snowRatio: 0.15,
     color: 'rgba(28,45,55,1)', opacity: 0.82,
 }, 'mid');
 
-// Couche 3 — chaîne lointaine (bleu-gris atmosphérique)
 buildMountainRing(780, 24, -20, 110, {
     width: 1024, height: 256, peaks: 12, peakH: 0.70, jagged: 0.20, snowRatio: 0.30,
     color: 'rgba(45,68,85,1)', opacity: 0.72,
 }, 'far');
 
-// Couche 4 — horizon montagneux très lointain (quasi silhouette vaporeuse)
 buildMountainRing(1100, 28, -28, 140, {
     width: 1024, height: 256, peaks: 14, peakH: 0.75, jagged: 0.14, snowRatio: 0.45,
     color: 'rgba(65,88,105,1)', opacity: 0.55,
 }, 'vfar');
 
-// Couleurs de montagne interpolées par heure (atmospheric scattering Firewatch)
 const MTN_COLORS = {
-    //         L1(near)        L2(mid)          L3(far)          L4(vfar)
     day:    ['#0f2012','#1a2f3a','#2d4458','#425870'],
     sunset: ['#1a0a08','#5a1a08','#7a2510','#8a3a20'],
     night:  ['#050a0e','#0a1018','#101820','#182030'],
     dawn:   ['#100806','#2a1510','#3a2020','#503030'],
 };
 const _mtnColors = mountainLayers.map(() => new THREE.Color());
-let _mtnT = 0; // 0=day,1=sunset,2=night,3=dawn
 
 function updateMountainColors(angle) {
     const PI = Math.PI;
-    // Correspondance angle → palette (même logique que le ciel)
     let palA, palB, t;
     if (angle < PI*0.20)      { palA='dawn';   palB='day';    t=angle/(PI*0.20); }
     else if (angle < PI*0.75) { palA='day';    palB='day';    t=0; }
@@ -262,7 +242,7 @@ function updateMountainPositions() {
         layer.sprites.forEach(sp => {
             sp.position.set(
                 cp.x + Math.cos(sp._angle) * sp._radius,
-                sp._yBase + cp.y * 0.05, // légère parallaxe verticale
+                sp._yBase + cp.y * 0.05,
                 cp.z + Math.sin(sp._angle) * sp._radius
             );
         });
@@ -272,12 +252,11 @@ function updateMountainPositions() {
 /* ─── CYCLE JOUR/NUIT ────────────────────────────────── */
 const DAY_DURATION=1200, ORBIT_R=1400;
 
-// Couleurs de brouillard Firewatch
 const FOG_COLORS = {
-    day:    new THREE.Color(0xc8dff0),  // brume bleue claire
-    sunset: new THREE.Color(0xe8895a),  // orange doux, pas rouge cramé
-    night:  new THREE.Color(0x04080f),  // nuit quasi noire
-    dawn:   new THREE.Color(0xd4956a),  // rose-pêche
+    day:    new THREE.Color(0xc8dff0),
+    sunset: new THREE.Color(0xe8895a),
+    night:  new THREE.Color(0x04080f),
+    dawn:   new THREE.Color(0xd4956a),
 };
 const _fogCol = new THREE.Color();
 
@@ -295,11 +274,10 @@ function updateDayNight(elapsed){
     sunSprite.material.opacity=Math.pow(sf,0.35); sunGlow.material.opacity=Math.pow(sf,0.5)*0.8;
     moonSprite.material.opacity=Math.pow(mf,0.35); moonGlow.material.opacity=Math.pow(mf,0.5)*0.7;
 
-    // Fog exponentiel — densité varie selon l'heure
-    const fogDayDensity   = 0.0045; // ~220u de visibilité
+    const fogDayDensity   = 0.0045;
     const fogNightDensity = 0.010;
     const fogSunsetDensity= 0.0065;
-    let fogDensity, fogColor;
+    let fogDensity;
 
     const a = angle, PI = Math.PI;
     if(a < PI*0.20) {
@@ -338,7 +316,6 @@ function updateDayNight(elapsed){
     starMat.uniforms.uT.value=elapsed;
     starsObj.position.copy(cp);
 
-    // Mise à jour couleurs montagnes
     updateMountainColors(angle);
 
     drawSky();
@@ -382,7 +359,13 @@ function fbm(x,z){ return simplex2(x*0.002,z*0.002)*14+simplex2(x*0.008,z*0.008)
 const HSTEP=0.5,hCache=new Map();
 function heightAt(wx,wz){
     const kx=Math.round(wx/HSTEP)|0,kz=Math.round(wz/HSTEP)|0,key=kx*100003+kz;
-    let h=hCache.get(key); if(h===undefined){h=fbm(wx,wz);hCache.set(key,h);} return h;
+    let h=hCache.get(key);
+    if(h===undefined){
+        // ✅ PATCH #3 : cache borné pour éviter la fuite mémoire
+        if(hCache.size>60000) hCache.clear();
+        h=fbm(wx,wz); hCache.set(key,h);
+    }
+    return h;
 }
 function findY(wx,wz){
     const x0=Math.floor(wx/HSTEP)*HSTEP,z0=Math.floor(wz/HSTEP)*HSTEP,fu=(wx-x0)/HSTEP,fv=(wz-z0)/HSTEP;
@@ -434,8 +417,42 @@ const GEO={
     towBarV:  new THREE.CylinderGeometry(0.05,0.05,1.15,5),
 };
 
-/* ─── GLOBAUX ────────────────────────────────────────── */
+/* ─── GLOBAUX + COLLIDERS SPATIAL GRID ───────────────── */
+// ✅ PATCH #2 : spatial grid pour accélérer resolveColliders
 const windObjects=[], fireflyData=[], globalColliders=[];
+
+const COL_CELL = 8;
+const colGrid = new Map();
+function colCellKey(x, z) {
+    return (Math.floor(x / COL_CELL) | 0) + ',' + (Math.floor(z / COL_CELL) | 0);
+}
+function colGridAdd(c) {
+    const k = colCellKey(c.x, c.z);
+    let arr = colGrid.get(k);
+    if (!arr) { arr = []; colGrid.set(k, arr); }
+    arr.push(c);
+}
+function colGridRemove(c) {
+    const k = colCellKey(c.x, c.z);
+    const arr = colGrid.get(k);
+    if (!arr) return;
+    const i = arr.indexOf(c);
+    if (i !== -1) arr.splice(i, 1);
+    if (arr.length === 0) colGrid.delete(k);
+}
+const _nearbyCache = [];
+function colGridQuery(x, z) {
+    _nearbyCache.length = 0;
+    const cx = Math.floor(x / COL_CELL) | 0;
+    const cz = Math.floor(z / COL_CELL) | 0;
+    for (let dx = -1; dx <= 1; dx++) {
+        for (let dz = -1; dz <= 1; dz++) {
+            const arr = colGrid.get((cx + dx) + ',' + (cz + dz));
+            if (arr) for (let i = 0; i < arr.length; i++) _nearbyCache.push(arr[i]);
+        }
+    }
+    return _nearbyCache;
+}
 
 /* ─── TOUR D'OBSERVATION ──────────────────────────────── */
 const TOWER_H  = 40;
@@ -499,7 +516,8 @@ function buildTower(wx,wz,grp,lc){
         const rung=new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.05,LADDER_W,6),MAT.towLog);
         rung.rotation.z=Math.PI/2; rung.position.set(0,ry,LADDER_Z); tg.add(rung);
     }
-    lc.push({type:'ladder',minX:wx-LADDER_W*0.6,maxX:wx+LADDER_W*0.6,minZ:wz+LADDER_Z-0.4,maxZ:wz+LADDER_Z+0.4,bottom:gy,top:gy+TOWER_H-0.2});
+    // ✅ PATCH #2 : ajout de x/z sur le ladder pour le spatial grid
+    lc.push({type:'ladder',x:wx,z:wz+LADDER_Z,minX:wx-LADDER_W*0.6,maxX:wx+LADDER_W*0.6,minZ:wz+LADDER_Z-0.4,maxZ:wz+LADDER_Z+0.4,bottom:gy,top:gy+TOWER_H-0.2});
     const floorW=PLT_HALF*2+0.15;
     for(let i=0;i<9;i++){
         const t=i/8,pz=-PLT_HALF+t*PLT_HALF*2;
@@ -530,7 +548,6 @@ function buildTower(wx,wz,grp,lc){
             const bar=new THREE.Mesh(GEO.towBarV,MAT.towRail);
             bar.position.set(bx,TOWER_H+0.72,bz); tg.add(bar);
         }
-        // Mur continu : collider tous les 0.5u pour boucher tout le garde-corps
         const nCol = Math.ceil(len / 0.5) + 1;
         for(let j=0;j<=nCol;j++){
             const offset=(j/nCol - 0.5)*len;
@@ -569,10 +586,6 @@ function buildMushroom(wx,wz,gy,r,grp){
 }
 
 /* ─── CHUNKS ─────────────────────────────────────────── */
-// CHUNK_RADIUS augmenté à 3 pour voir plus loin sans coût excessif
-// (les chunks lointains ont moins d'arbres grâce au LOD implicite)
-// CHUNK_SEGS doit donner CHUNK_SIZE/CHUNK_SEGS = multiple de HSTEP(0.5)
-// 80/16 = 5.0 → multiple de 0.5 ✓  (était 14 → 80/14≈5.71 → coutures !)
 const CHUNK_SIZE=80, CHUNK_SEGS=16, CHUNK_RADIUS=3;
 const loadedChunks=new Map(), chunkFadeIn=new Map();
 function seededRng(seed){
@@ -593,26 +606,16 @@ function _buildChunk(cx,cz,key){
     const r=seededRng(cx*73856093^cz*19349663);
     const grp=new THREE.Group(),lc=[];
 
-    // Distance au centre pour LOD
     const distFromOrigin = Math.sqrt(cx*cx+cz*cz);
-    const isLOD = distFromOrigin > 1.5; // chunks lointains = LOD réduit
+    const isLOD = distFromOrigin > 1.5;
 
-    /* SOL — grille uniforme pour éviter les coutures entre chunks
-       Tous les chunks utilisent CHUNK_SEGS, les chunks LOD simplifient
-       seulement les arbres/détails, PAS le terrain. Le pas de grille est
-       toujours CHUNK_SIZE/CHUNK_SEGS, donc les bords se partagent
-       exactement les mêmes coordonnées monde entre chunks voisins. */
-    const GRID = CHUNK_SEGS; // toujours identique, même en LOD
-    const STEP = CHUNK_SIZE / GRID;
+    const GRID = CHUNK_SEGS;
     const tgeo = new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE, GRID, GRID);
     const vp = tgeo.attributes.position.array;
-    // PlaneGeometry en XY avant rotation : x = col, y = row (inversé en Z après rotation)
-    // On recalcule chaque vertex avec heightAt qui snappe à HSTEP
     for (let i = 0; i < vp.length; i += 3) {
-        // vp[i]=x local, vp[i+1]=y local (sera Z monde après rotation)
         const wx = oX + vp[i];
-        const wz = oZ - vp[i + 1]; // PlaneGeometry Y → Z monde (rotation.x = -PI/2)
-        vp[i + 2] = heightAt(wx, wz); // Z local = hauteur, deviendra Y monde
+        const wz = oZ - vp[i + 1];
+        vp[i + 2] = heightAt(wx, wz);
     }
     tgeo.computeVertexNormals();
     const terr = new THREE.Mesh(tgeo, MAT.ground);
@@ -634,7 +637,6 @@ function _buildChunk(cx,cz,key){
         towerInfo=buildTower(twx,twz,grp,lc);
     }
 
-    /* POINTS OCCUPÉS */
     const occupied=[];
     if(towerInfo) occupied.push({x:towerInfo.wx,z:towerInfo.wz,r:towerInfo.clearR+5});
     function canPlace(wx,wz,minDist){
@@ -642,7 +644,7 @@ function _buildChunk(cx,cz,key){
     }
     function occupy(wx,wz,rad){ occupied.push({x:wx,z:wz,r:rad}); }
 
-    /* ARBRES — moins dans les chunks LOD */
+    /* ARBRES */
     const treeN = isLOD ? 4+(r()*4|0) : 7+(r()*7|0);
     const tpts=[];
     for(let i=0;i<treeN;i++){
@@ -656,7 +658,6 @@ function _buildChunk(cx,cz,key){
         const gy=findY(wx,wz),h=28+r()*18,tr=1.4+r()*1.0,trunkH=h*(0.28+r()*0.08),tgr=new THREE.Group();
         const trunk=new THREE.Mesh(new THREE.CylinderGeometry(tr*0.55,tr*1.4,trunkH+6,9),MAT.trunk);
         trunk.position.y=trunkH/2-3; trunk.castShadow=!isLOD; tgr.add(trunk);
-        // Layers réduits en LOD
         const layers = isLOD ? 5+(r()*3|0) : 9+(r()*5|0);
         const foliageH=h-trunkH;
         for(let li=0;li<layers;li++){
@@ -669,7 +670,6 @@ function _buildChunk(cx,cz,key){
         lc.push({type:'cylinder',x:wx,y:gy,z:wz,r:tr*1.7,h:trunkH+6});
     }
 
-    // Contenu détaillé uniquement pour chunks proches
     if(!isLOD){
         /* ROCHERS */
         for(let i=0,n=1+(r()*3|0);i<n;i++){
@@ -718,10 +718,10 @@ function _buildChunk(cx,cz,key){
         }
     }
 
-    /* HERBE — réduite en LOD */
+    /* HERBE */
     const gn = isLOD ? 20+(r()*20|0) : 45+(r()*40|0);
     const gm=new THREE.InstancedMesh(GEO.grass,MAT.grass,gn);
-    gm.frustumCulled=false;
+    // ✅ PATCH #4 : frustumCulled reste à true (défaut) — le chunk entier est culled d'un coup
     const dm=new THREE.Object3D();
     for(let i=0;i<gn;i++){
         const wx=oX+(r()-0.5)*CHUNK_SIZE,wz=oZ+(r()-0.5)*CHUNK_SIZE;
@@ -739,7 +739,10 @@ function _buildChunk(cx,cz,key){
         obj.material=Array.isArray(obj.material)?cl:cl[0];
     });
 
+    // ✅ PATCH #2 : enregistre aussi dans le spatial grid
     globalColliders.push(...lc);
+    for (let i = 0; i < lc.length; i++) colGridAdd(lc[i]);
+
     scene.add(grp);
     loadedChunks.set(key,{group:grp,localColliders:lc});
     chunkFadeIn.set(key,{group:grp,alpha:0});
@@ -756,7 +759,12 @@ function unloadChunk(cx,cz){
         const mats=Array.isArray(obj.material)?obj.material:[obj.material];
         mats.forEach(m=>{ if(m._bOp!==undefined) m.dispose(); });
     });
-    for(const c of data.localColliders){ const idx=globalColliders.indexOf(c); if(idx!==-1)globalColliders.splice(idx,1); }
+    // ✅ PATCH #2 : retire du spatial grid
+    for(const c of data.localColliders){
+        const idx=globalColliders.indexOf(c);
+        if(idx!==-1)globalColliders.splice(idx,1);
+        colGridRemove(c);
+    }
     data.group.traverse(obj=>{
         const fi=fireflyData.findIndex(f=>f.mesh===obj); if(fi!==-1)fireflyData.splice(fi,1);
         const wi=windObjects.findIndex(w=>w.mesh===obj); if(wi!==-1)windObjects.splice(wi,1);
@@ -779,11 +787,20 @@ function updateChunks(px,pz){
 }
 
 /* ─── PHYSIQUE ───────────────────────────────────────── */
-const PLAYER_R=0.4,PLAYER_H=1.8;
+// ✅ PATCH #1 : constantes dt-based
+const PLAYER_R=0.4, PLAYER_H=1.8;
+const GRAVITY = 32;
+const JUMP_IMPULSE = 6.5;
+const CLIMB_SPEED = 6.0;
+const FRICTION = 0.88;
+
 function resolveColliders(nx, ny, nz) {
     let onTop = false;
     let isOnLadder = false;
-    for (const c of globalColliders) {
+    // ✅ PATCH #2 : query spatial grid au lieu de scanner globalColliders
+    const nearby = colGridQuery(nx, nz);
+    for (let ci = 0; ci < nearby.length; ci++) {
+        const c = nearby[ci];
         if (c.type === 'ladder') {
             if (nx > c.minX && nx < c.maxX && nz > c.minZ && nz < c.maxZ) {
                 const pBot = ny - PLAYER_H;
@@ -816,7 +833,8 @@ let jumpVel=0,grounded=true,smoothGroundY=null;
 addEventListener('keydown',e=>{
     const k=e.key.toLowerCase(); if(k in keys)keys[k]=true;
     if(e.shiftKey)keys.shift=true;
-    if(e.code==='Space'&&grounded){grounded=false;jumpVel=0.32;}
+    // ✅ PATCH #1 : impulsion en u/s
+    if(e.code==='Space'&&grounded){grounded=false;jumpVel=JUMP_IMPULSE;}
 });
 addEventListener('keyup',e=>{
     const k=e.key.toLowerCase(); if(k in keys)keys[k]=false;
@@ -830,25 +848,31 @@ function updateMovement(dt) {
     const check = resolveColliders(camera.position.x, camera.position.y, camera.position.z);
     if (check.isOnLadder) {
         velocity.set(0, 0, 0); jumpVel = 0; grounded = true;
-        const climbSpeed = 0.18;
-        if (keys.z) camera.position.y += climbSpeed;
-        if (keys.s) camera.position.y -= climbSpeed;
-        if (keys.q) camera.position.addScaledVector(_right, -0.05);
-        if (keys.d) camera.position.addScaledVector(_right, 0.05);
-        if (keys.s && !keys.z) camera.position.addScaledVector(_fwd, -0.03);
+        // ✅ PATCH #1 : vitesse dt-based
+        const climb = CLIMB_SPEED * dt;
+        if (keys.z) camera.position.y += climb;
+        if (keys.s) camera.position.y -= climb;
+        const strafe = 3.0 * dt;
+        if (keys.q) camera.position.addScaledVector(_right, -strafe);
+        if (keys.d) camera.position.addScaledVector(_right, strafe);
+        if (keys.s && !keys.z) camera.position.addScaledVector(_fwd, -2.0 * dt);
     } else {
         const slope = 1 - Math.abs(terrainNormal(camera.position.x, camera.position.z).y);
-        const accel = (run ? 0.065 : 0.032) * (1 - slope * 0.5);
+        // ✅ PATCH #1 : accélération en u/s²
+        const accelBase = run ? 3.9 : 1.9;
+        const accel = accelBase * (1 - slope * 0.5) * dt;
         if (keys.z) velocity.addScaledVector(_fwd, accel);
         if (keys.s) velocity.addScaledVector(_fwd, -accel);
         if (keys.q) velocity.addScaledVector(_right, -accel);
         if (keys.d) velocity.addScaledVector(_right, accel);
-        velocity.multiplyScalar(0.88);
+        // ✅ PATCH #1 : friction dt-normalisée
+        velocity.multiplyScalar(Math.pow(FRICTION, dt * 60));
         let nx = camera.position.x + velocity.x;
         let ny = camera.position.y;
         let nz = camera.position.z + velocity.z;
-        jumpVel = Math.max(jumpVel - 0.016, -1.2);
-        ny += jumpVel;
+        // ✅ PATCH #1 : gravité en u/s²
+        jumpVel = Math.max(jumpVel - GRAVITY * dt, -25);
+        ny += jumpVel * dt;
         const moveRes = resolveColliders(nx, ny, nz);
         nx = moveRes.x; ny = moveRes.y; nz = moveRes.z;
         const tgy = findY(nx, nz) + PLAYER_H;
@@ -871,6 +895,9 @@ function updateMovement(dt) {
 const clock=new THREE.Clock();
 let elapsed=DAY_DURATION*0.25;
 updateChunks(0,0);
+// ✅ PATCH #5 : cache position pour updateMountainPositions
+const _lastMtnPos = new THREE.Vector3(Infinity, Infinity, Infinity);
+
 function animate(){
     requestAnimationFrame(animate);
     const dt=Math.min(clock.getDelta(),0.05);
@@ -899,8 +926,11 @@ function animate(){
     updateDayNight(elapsed);
     if(controls.isLocked) updateMovement(dt);
     updateChunks(camera.position.x,camera.position.z);
-    // Mise à jour montagnes chaque frame (très léger, juste des positions)
-    updateMountainPositions();
+    // ✅ PATCH #5 : ne met à jour les montagnes que si la caméra a bougé
+    if (camera.position.distanceToSquared(_lastMtnPos) > 0.01) {
+        updateMountainPositions();
+        _lastMtnPos.copy(camera.position);
+    }
     renderer.render(scene,camera);
 }
 animate();
