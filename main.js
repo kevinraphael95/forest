@@ -18,7 +18,6 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
-// ✅ PATCH #6 : SRGBColorSpace (test visuel — reviens à LinearSRGB si trop délavé)
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 document.body.appendChild(renderer.domElement);
 
@@ -361,9 +360,8 @@ function heightAt(wx,wz){
     const kx=Math.round(wx/HSTEP)|0,kz=Math.round(wz/HSTEP)|0,key=kx*100003+kz;
     let h=hCache.get(key);
     if(h===undefined){
-        // ✅ PATCH #3 : cache borné pour éviter la fuite mémoire
         if(hCache.size>60000) hCache.clear();
-        h=fbm(wx,wz); hCache.set(key,h);
+        h=fbm(wx,wz);hCache.set(key,h);
     }
     return h;
 }
@@ -418,7 +416,6 @@ const GEO={
 };
 
 /* ─── GLOBAUX + COLLIDERS SPATIAL GRID ───────────────── */
-// ✅ PATCH #2 : spatial grid pour accélérer resolveColliders
 const windObjects=[], fireflyData=[], globalColliders=[];
 
 const COL_CELL = 8;
@@ -516,7 +513,6 @@ function buildTower(wx,wz,grp,lc){
         const rung=new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.05,LADDER_W,6),MAT.towLog);
         rung.rotation.z=Math.PI/2; rung.position.set(0,ry,LADDER_Z); tg.add(rung);
     }
-    // ✅ PATCH #2 : ajout de x/z sur le ladder pour le spatial grid
     lc.push({type:'ladder',x:wx,z:wz+LADDER_Z,minX:wx-LADDER_W*0.6,maxX:wx+LADDER_W*0.6,minZ:wz+LADDER_Z-0.4,maxZ:wz+LADDER_Z+0.4,bottom:gy,top:gy+TOWER_H-0.2});
     const floorW=PLT_HALF*2+0.15;
     for(let i=0;i<9;i++){
@@ -721,7 +717,6 @@ function _buildChunk(cx,cz,key){
     /* HERBE */
     const gn = isLOD ? 20+(r()*20|0) : 45+(r()*40|0);
     const gm=new THREE.InstancedMesh(GEO.grass,MAT.grass,gn);
-    // ✅ PATCH #4 : frustumCulled reste à true (défaut) — le chunk entier est culled d'un coup
     const dm=new THREE.Object3D();
     for(let i=0;i<gn;i++){
         const wx=oX+(r()-0.5)*CHUNK_SIZE,wz=oZ+(r()-0.5)*CHUNK_SIZE;
@@ -739,7 +734,6 @@ function _buildChunk(cx,cz,key){
         obj.material=Array.isArray(obj.material)?cl:cl[0];
     });
 
-    // ✅ PATCH #2 : enregistre aussi dans le spatial grid
     globalColliders.push(...lc);
     for (let i = 0; i < lc.length; i++) colGridAdd(lc[i]);
 
@@ -759,7 +753,6 @@ function unloadChunk(cx,cz){
         const mats=Array.isArray(obj.material)?obj.material:[obj.material];
         mats.forEach(m=>{ if(m._bOp!==undefined) m.dispose(); });
     });
-    // ✅ PATCH #2 : retire du spatial grid
     for(const c of data.localColliders){
         const idx=globalColliders.indexOf(c);
         if(idx!==-1)globalColliders.splice(idx,1);
@@ -787,7 +780,6 @@ function updateChunks(px,pz){
 }
 
 /* ─── PHYSIQUE ───────────────────────────────────────── */
-// ✅ PATCH #1 : constantes dt-based
 const PLAYER_R=0.4, PLAYER_H=1.8;
 const GRAVITY = 32;
 const JUMP_IMPULSE = 6.5;
@@ -797,7 +789,6 @@ const FRICTION = 0.88;
 function resolveColliders(nx, ny, nz) {
     let onTop = false;
     let isOnLadder = false;
-    // ✅ PATCH #2 : query spatial grid au lieu de scanner globalColliders
     const nearby = colGridQuery(nx, nz);
     for (let ci = 0; ci < nearby.length; ci++) {
         const c = nearby[ci];
@@ -833,7 +824,6 @@ let jumpVel=0,grounded=true,smoothGroundY=null;
 addEventListener('keydown',e=>{
     const k=e.key.toLowerCase(); if(k in keys)keys[k]=true;
     if(e.shiftKey)keys.shift=true;
-    // ✅ PATCH #1 : impulsion en u/s
     if(e.code==='Space'&&grounded){grounded=false;jumpVel=JUMP_IMPULSE;}
 });
 addEventListener('keyup',e=>{
@@ -848,7 +838,6 @@ function updateMovement(dt) {
     const check = resolveColliders(camera.position.x, camera.position.y, camera.position.z);
     if (check.isOnLadder) {
         velocity.set(0, 0, 0); jumpVel = 0; grounded = true;
-        // ✅ PATCH #1 : vitesse dt-based
         const climb = CLIMB_SPEED * dt;
         if (keys.z) camera.position.y += climb;
         if (keys.s) camera.position.y -= climb;
@@ -858,19 +847,16 @@ function updateMovement(dt) {
         if (keys.s && !keys.z) camera.position.addScaledVector(_fwd, -2.0 * dt);
     } else {
         const slope = 1 - Math.abs(terrainNormal(camera.position.x, camera.position.z).y);
-        // ✅ PATCH #1 : accélération en u/s²
         const accelBase = run ? 3.9 : 1.9;
         const accel = accelBase * (1 - slope * 0.5) * dt;
         if (keys.z) velocity.addScaledVector(_fwd, accel);
         if (keys.s) velocity.addScaledVector(_fwd, -accel);
         if (keys.q) velocity.addScaledVector(_right, -accel);
         if (keys.d) velocity.addScaledVector(_right, accel);
-        // ✅ PATCH #1 : friction dt-normalisée
         velocity.multiplyScalar(Math.pow(FRICTION, dt * 60));
         let nx = camera.position.x + velocity.x;
         let ny = camera.position.y;
         let nz = camera.position.z + velocity.z;
-        // ✅ PATCH #1 : gravité en u/s²
         jumpVel = Math.max(jumpVel - GRAVITY * dt, -25);
         ny += jumpVel * dt;
         const moveRes = resolveColliders(nx, ny, nz);
@@ -891,11 +877,177 @@ function updateMovement(dt) {
     }
 }
 
+/* ─── CORPS FIRST-PERSON (Firewatch) ─────────────────── */
+// Hiérarchie :
+//   bodyRoot (suit position caméra, pas rotation)
+//     ├─ bodyHead (suit yaw caméra — torse/bras/tête)
+//     └─ legGroup (ne suit PAS le yaw — les jambes restent alignées au sol)
+const bodyRoot = new THREE.Group();
+scene.add(bodyRoot);
+const bodyHead = new THREE.Group();
+bodyRoot.add(bodyHead);
+const legGroup = new THREE.Group();
+bodyRoot.add(legGroup);
+
+// Matériaux — palette Firewatch (ranger chaleureux)
+const BODY_MAT = {
+    skin:  new THREE.MeshStandardMaterial({ color: 0xc8956a, roughness: 0.9, side: THREE.DoubleSide }),
+    shirt: new THREE.MeshStandardMaterial({ color: 0x8a4a2a, roughness: 1.0, side: THREE.DoubleSide }), // veste brique
+    pants: new THREE.MeshStandardMaterial({ color: 0x3a4a2a, roughness: 1.0 }),                          // pantalon olive
+    boots: new THREE.MeshStandardMaterial({ color: 0x2a1a0a, roughness: 1.0 }),                          // bottes marron
+};
+
+// ── TORSE ──
+const torso = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.22, 0.26, 0.75, 8),
+    BODY_MAT.shirt
+);
+torso.position.y = -0.55;
+bodyHead.add(torso);
+
+// ── BRAS ──
+// Chaque bras = 3 segments (haut, avant-bras, main), pivot au niveau de l'épaule
+function makeArm(side) {
+    const shoulder = new THREE.Group();
+    shoulder.position.set(side * 0.26, -0.25, 0);
+    bodyHead.add(shoulder);
+
+    const upper = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.06, 0.055, 0.45, 6),
+        BODY_MAT.shirt
+    );
+    upper.position.y = -0.22;
+    shoulder.add(upper);
+
+    // Pivot coude
+    const elbow = new THREE.Group();
+    elbow.position.y = -0.45;
+    shoulder.add(elbow);
+
+    const forearm = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.05, 0.045, 0.42, 6),
+        BODY_MAT.skin
+    );
+    forearm.position.y = -0.21;
+    elbow.add(forearm);
+
+    const hand = new THREE.Mesh(
+        new THREE.SphereGeometry(0.055, 6, 5),
+        BODY_MAT.skin
+    );
+    hand.position.y = -0.44;
+    hand.position.z = 0.02;
+    elbow.add(hand);
+
+    // Pose de repos : bras légèrement fléchis
+    elbow.rotation.x = -0.25;
+
+    return { shoulder, elbow };
+}
+const armL = makeArm(-1);
+const armR = makeArm( 1);
+
+// ── JAMBES ──
+function makeLeg(side) {
+    const hip = new THREE.Group();
+    hip.position.set(side * 0.11, -1.05, 0);
+    legGroup.add(hip);
+
+    const thigh = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.09, 0.08, 0.55, 6),
+        BODY_MAT.pants
+    );
+    thigh.position.y = -0.27;
+    hip.add(thigh);
+
+    // Pivot genou
+    const knee = new THREE.Group();
+    knee.position.y = -0.55;
+    hip.add(knee);
+
+    const shin = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.08, 0.07, 0.45, 6),
+        BODY_MAT.pants
+    );
+    shin.position.y = -0.22;
+    knee.add(shin);
+
+    const boot = new THREE.Mesh(
+        new THREE.BoxGeometry(0.14, 0.12, 0.26),
+        BODY_MAT.boots
+    );
+    boot.position.set(0, -0.48, 0.05);
+    knee.add(boot);
+
+    return { hip, knee };
+}
+const legL = makeLeg(-1);
+const legR = makeLeg( 1);
+
+// État de l'animation
+let walkPhase = 0;
+const _bodyEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+
+function updateBody(dt, moving) {
+    // 1. Position : suit la caméra, décalé vers le bas
+    bodyRoot.position.copy(camera.position);
+    bodyRoot.position.y -= PLAYER_H * 0.9;
+
+    // 2. Yaw : le torse suit la direction horizontale de la caméra
+    _bodyEuler.setFromQuaternion(camera.quaternion, 'YXZ');
+    bodyHead.rotation.y = _bodyEuler.y;
+
+    // Les jambes suivent aussi le yaw (pour que le corps reste cohérent)
+    legGroup.rotation.y = _bodyEuler.y;
+
+    // 3. Animation
+    if (moving && grounded) {
+        // Marche : balancier en opposition
+        walkPhase += dt * 9;
+        const swing = Math.sin(walkPhase) * 0.55;
+        const bob = Math.abs(Math.sin(walkPhase * 2)) * 0.04;
+
+        armL.shoulder.rotation.x =  swing;
+        armR.shoulder.rotation.x = -swing;
+        armL.elbow.rotation.x = -0.25 + swing * 0.3;
+        armR.elbow.rotation.x = -0.25 - swing * 0.3;
+
+        legL.hip.rotation.x = -swing * 0.8;
+        legR.hip.rotation.x =  swing * 0.8;
+        // Léger pli des genoux en opposition
+        legL.knee.rotation.x = Math.max(0,  swing) * 0.4;
+        legR.knee.rotation.x = Math.max(0, -swing) * 0.4;
+
+        bodyRoot.position.y += bob;
+    } else if (!grounded) {
+        // Saut : bras qui montent, jambes qui se replient
+        const t = Math.min(1, dt * 6);
+        armL.shoulder.rotation.x += (-1.0 - armL.shoulder.rotation.x) * t;
+        armR.shoulder.rotation.x += (-1.0 - armR.shoulder.rotation.x) * t;
+        armL.elbow.rotation.x += (-0.5 - armL.elbow.rotation.x) * t;
+        armR.elbow.rotation.x += (-0.5 - armR.elbow.rotation.x) * t;
+        legL.hip.rotation.x += (-0.3 - legL.hip.rotation.x) * t;
+        legR.hip.rotation.x += (-0.3 - legR.hip.rotation.x) * t;
+        legL.knee.rotation.x += (0.6 - legL.knee.rotation.x) * t;
+        legR.knee.rotation.x += (0.6 - legR.knee.rotation.x) * t;
+    } else {
+        // Repos : retour doux aux poses neutres
+        const t = Math.min(1, dt * 8);
+        armL.shoulder.rotation.x *= 1 - t;
+        armR.shoulder.rotation.x *= 1 - t;
+        armL.elbow.rotation.x += (-0.25 - armL.elbow.rotation.x) * t;
+        armR.elbow.rotation.x += (-0.25 - armR.elbow.rotation.x) * t;
+        legL.hip.rotation.x *= 1 - t;
+        legR.hip.rotation.x *= 1 - t;
+        legL.knee.rotation.x *= 1 - t;
+        legR.knee.rotation.x *= 1 - t;
+    }
+}
+
 /* ─── BOUCLE ─────────────────────────────────────────── */
 const clock=new THREE.Clock();
 let elapsed=DAY_DURATION*0.25;
 updateChunks(0,0);
-// ✅ PATCH #5 : cache position pour updateMountainPositions
 const _lastMtnPos = new THREE.Vector3(Infinity, Infinity, Infinity);
 
 function animate(){
@@ -925,8 +1077,13 @@ function animate(){
     }
     updateDayNight(elapsed);
     if(controls.isLocked) updateMovement(dt);
+
+    // ✅ Corps : toujours mis à jour (même hors lock, sinon il reste figé)
+    const speed2D = Math.sqrt(velocity.x * velocity.x + velocity.z * velocity.z);
+    const isMoving = speed2D > 0.3;
+    updateBody(dt, isMoving);
+
     updateChunks(camera.position.x,camera.position.z);
-    // ✅ PATCH #5 : ne met à jour les montagnes que si la caméra a bougé
     if (camera.position.distanceToSquared(_lastMtnPos) > 0.01) {
         updateMountainPositions();
         _lastMtnPos.copy(camera.position);
